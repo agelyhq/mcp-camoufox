@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OS Fingerprint Checker</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; background: #0a0a0f; color: #c8c8d0; font-size: 13px; }
+
+  #header { padding: 20px 24px; background: #12121a; border-bottom: 1px solid #1e1e2e; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+  #header .score { font-size: 20px; font-weight: 700; }
+  #header .meta { color: #7a7a8e; font-size: 12px; }
+
+  #verdict { padding: 20px 24px; border-bottom: 1px solid #1e1e2e; display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; }
+  .os-box { background: #12121a; border: 1px solid #1e1e2e; border-radius: 6px; padding: 16px 24px; min-width: 200px; }
+  .os-box .os-label { font-size: 11px; color: #7a7a8e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .os-box .os-value { font-size: 22px; font-weight: 700; }
+  .os-box .os-confidence { font-size: 13px; margin-top: 4px; }
+  .bar { height: 6px; border-radius: 3px; background: #1e1e2e; margin-top: 6px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 3px; }
+
+  main { padding: 24px; max-width: 1100px; }
+  .section { margin-bottom: 20px; border: 1px solid #1e1e2e; border-radius: 6px; overflow: hidden; }
+  .section-title { padding: 10px 16px; background: #12121a; font-weight: 600; color: #e0e0ea; display: flex; justify-content: space-between; align-items: center; }
+  .section-body { padding: 12px 16px; }
+
+  .row { display: flex; padding: 5px 0; border-bottom: 1px solid #0f0f18; align-items: baseline; }
+  .row:last-child { border: none; }
+  .row .k { width: 260px; flex-shrink: 0; color: #7a7a8e; }
+  .row .v { flex: 1; word-break: break-all; }
+
+  .pass { color: #4cda6a; }
+  .fail { color: #ff4c6a; }
+  .warn { color: #ffb84c; }
+  .muted { color: #555568; }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; }
+  .badge-pass { background: #0a2a14; color: #4cda6a; border: 1px solid #1a4a2a; }
+  .badge-fail { background: #2a0a14; color: #ff4c6a; border: 1px solid #4a1a2a; }
+  .badge-warn { background: #2a1a0a; color: #ffb84c; border: 1px solid #4a3a1a; }
+
+  .tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 11px; margin-left: 6px; }
+  .tag-windows { background: #1a1a3a; color: #6c9cff; }
+  .tag-macos { background: #2a1a2a; color: #cc8cff; }
+  .tag-linux { background: #0a2a14; color: #4cda6a; }
+  .tag-unknown { background: #1e1e2e; color: #7a7a8e; }
+
+  button { background: #1e1e3a; color: #c8c8d0; border: 1px solid #2e2e4a; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 12px; }
+  button:hover { background: #2e2e4a; }
+</style>
+</head>
+<body>
+
+<!--
+  PLAYWRIGHT SCRAPING API:
+
+  Hidden fields (always present):
+    #detected-os          text content = "Windows" | "macOS" | "Linux" | "Unknown"
+    #os-confidence        text content = 0-100
+    #score                text content = 0-100
+    #grade                text content = "A" | "B" | "C" | "D" | "F"
+    #error-count          text content = number
+    #warning-count        text content = number
+
+  Sections:
+    #section-validation   .row.error / .row.warning children
+    #section-vectors      rows with data-vector="user-agent|platform|fonts|webgl|client-hints"
+    #section-navigator    rows with data-prop="platform|userAgent|oscpu|..."
+    #section-engine       rows with data-prop="engine|vendor-flavors"
+    #section-fonts        rows with data-font="FontName"
+    #section-webgl        rows with data-prop="unmasked-vendor|unmasked-renderer|..."
+    #section-worker       rows with data-prop="worker-platform|worker-concurrency"
+    #section-lies         rows with data-lie="navigator.platform|..."
+    #section-screen       rows with data-prop="width|height|..."
+    #section-timezone     rows with data-prop="timezone|locale|offset"
+    #section-canvas       rows with data-prop="hash"
+
+  JS global:
+    window.__OS_FP_RESULT__   full result object
+    document.title            set to "FP_READY" when done
+-->
+
+<div id="header">
+  <div>
+    <span class="score" id="score-display">...</span>
+    <span id="grade-display"></span>
+  </div>
+  <div class="meta" id="meta-display"></div>
+  <button onclick="location.reload()">Re-run</button>
+</div>
+
+<div id="verdict"></div>
+
+<span id="detected-os" hidden></span>
+<span id="os-confidence" hidden></span>
+<span id="score" hidden></span>
+<span id="grade" hidden></span>
+<span id="error-count" hidden></span>
+<span id="warning-count" hidden></span>
+
+<main id="results"></main>
+
+<script>
+'use strict';
+
+/* ============================================================
+   NORMALIZE OS NAMES
+   ============================================================ */
+const OS = Object.freeze({
+  WINDOWS: 'Windows',
+  MACOS: 'macOS',
+  LINUX: 'Linux',
+  ANDROID: 'Android',
+  IOS: 'iOS',
+  CHROMEOS: 'ChromeOS',
+  UNKNOWN: 'Unknown',
+});
+
+function normalizeOS(raw) {
+  if (!raw) return OS.UNKNOWN;
+  const s = String(raw).toLowerCase();
+  if (/windows/.test(s)) return OS.WINDOWS;
+  if (/mac|apple|darwin/.test(s)) return OS.MACOS;
+  if (/android/.test(s)) return OS.ANDROID;
+  if (/iphone|ipad|ipod|ios/.test(s)) return OS.IOS;
+  if (/cros|chrome\s?os/.test(s)) return OS.CHROMEOS;
+  if (/linux|x11|ubuntu|debian|fedora/.test(s)) return OS.LINUX;
+  return OS.UNKNOWN;
+}
+
+/* ============================================================
+   COLLECTORS
+   ============================================================ */
+
+function collectNavigator() {
+  const n = navigator;
+  return {
+    platform: n.platform,
+    userAgent: n.userAgent,
+    oscpu: n.oscpu || null,
+    vendor: n.vendor,
+    hardwareConcurrency: n.hardwareConcurrency,
+    deviceMemory: n.deviceMemory || null,
+    maxTouchPoints: n.maxTouchPoints,
+    languages: [...(n.languages || [])],
+    webdriver: n.webdriver,
+  };
+}
+
+async function collectUAClientHints() {
+  try {
+    if (!navigator.userAgentData) return null;
+    const d = await navigator.userAgentData.getHighEntropyValues(
+      ['platform', 'platformVersion', 'architecture', 'bitness', 'model', 'fullVersionList'],
+    );
+    return {
+      platform: d.platform,
+      platformVersion: d.platformVersion,
+      architecture: d.architecture,
+      bitness: d.bitness,
+      mobile: d.mobile,
+      brands: (d.fullVersionList || d.brands || []).map(b => `${b.brand} ${b.version}`),
+    };
+  } catch { return null; }
+}
+
+function detectEngine() {
+  const w = window, n = navigator, s = document.documentElement?.style ?? {};
+  const ct = arr => arr.filter(Boolean).length;
+
+  const isGecko = ct([
+    'buildID' in n, 'MozAppearance' in s,
+    'onmozfullscreenchange' in w, 'mozInnerScreenX' in w,
+    'CSSMozDocumentRule' in w, 'CanvasCaptureMediaStream' in w,
+  ]) >= 4;
+
+  const isChromium = ct([
+    'webkitPersistentStorage' in n, 'webkitTemporaryStorage' in n,
+    (n.vendor || '').startsWith('Google'), 'webkitResolveLocalFileSystemURL' in w,
+    'BatteryManager' in w, 'webkitMediaStream' in w, 'webkitSpeechGrammar' in w,
+  ]) >= 5;
+
+  const isWebKit = ct([
+    'ApplePayError' in w, 'CSSPrimitiveValue' in w, 'Counter' in w,
+    (n.vendor || '').startsWith('Apple'), 'RGBColor' in w, 'WebKitMediaKeys' in w,
+  ]) >= 4;
+
+  const engine = isGecko ? 'Gecko' : isChromium ? 'Chromium' : isWebKit ? 'WebKit' : 'Unknown';
+  const flavors = ['chrome','safari','__crWeb','__gCrWeb','__firefox__','__edgeTrackingPreventionStatistics','oprt','samsungAr']
+    .filter(k => { try { const v = w[k]; return v && typeof v === 'object'; } catch { return false; } });
+
+  return { engine, isGecko, isChromium, isWebKit, vendorFlavors: flavors };
+}
+
+function detectOSFromUA(ua) {
+  if (!ua) return OS.UNKNOWN;
+  if (/windows phone/i.test(ua)) return OS.WINDOWS;
+  if (/win(dows|16|32|64|95|98|nt)|wow64/i.test(ua)) return OS.WINDOWS;
+  if (/android/i.test(ua)) return OS.ANDROID;
+  if (/cros/i.test(ua)) return OS.CHROMEOS;
+  if (/linux/i.test(ua)) return OS.LINUX;
+  if (/ipad|iphone|ipod/i.test(ua)) return OS.IOS;
+  if (/mac/i.test(ua)) return OS.MACOS;
+  return OS.UNKNOWN;
+}
+
+function detectOSFromPlatform(p) {
+  if (!p) return OS.UNKNOWN;
+  if (/win/i.test(p)) return OS.WINDOWS;
+  if (/mac/i.test(p)) return OS.MACOS;
+  if (/linux/i.test(p)) return OS.LINUX;
+  if (/ipad|iphone/i.test(p)) return OS.IOS;
+  return OS.UNKNOWN;
+}
+
+/* --- FONT DETECTION (span width comparison) --- */
+function detectOSFonts() {
+  const testString = 'mmMwWLliI0fiflO&1';
+  const testSize = '72px';
+  const baseFonts = ['monospace', 'sans-serif', 'serif'];
+
+  const container = document.createElement('div');
+  container.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden;';
+  document.body.appendChild(container);
+
+  const baseWidths = {}, baseHeights = {};
+  for (const base of baseFonts) {
+    const span = document.createElement('span');
+    span.style.cssText = `font-family:${base};font-size:${testSize};white-space:nowrap;position:absolute;`;
+    span.textContent = testString;
+    container.appendChild(span);
+    baseWidths[base] = span.offsetWidth;
+    baseHeights[base] = span.offsetHeight;
+  }
+
+  function isFontAvailable(font) {
+    for (const base of baseFonts) {
+      const span = document.createElement('span');
+      span.style.cssText = `font-family:'${font}',${base};font-size:${testSize};white-space:nowrap;position:absolute;`;
+      span.textContent = testString;
+      container.appendChild(span);
+      if (span.offsetWidth !== baseWidths[base] || span.offsetHeight !== baseHeights[base]) return true;
+    }
+    return false;
+  }
+
+  const fontDB = {
+    Windows: {
+      'Win7+':   ['Cambria Math', 'Lucida Console'],
+      'Win8+':   ['Aldhabi', 'Gadugi', 'Myanmar Text', 'Nirmala UI'],
+      'Win8.1+': ['Leelawadee UI', 'Javanese Text', 'Segoe UI Emoji'],
+      'Win10+':  ['HoloLens MDL2 Assets', 'Segoe MDL2 Assets', 'Bahnschrift', 'Ink Free'],
+      'Win11':   ['Segoe Fluent Icons'],
+    },
+    macOS: {
+      '10.9+':  ['Helvetica Neue', 'Geneva'],
+      '10.10+': ['Kohinoor Devanagari Medium', 'Luminari'],
+      '10.11+': ['PingFang HK Light'],
+      '10.12+': ['American Typewriter Semibold', 'Futura Bold'],
+      '10.13+': ['InaiMathi Bold'],
+      '10.15+': ['Galvji', 'MuktaMahee Regular'],
+      '12+':    ['Noto Sans Masaram Gondi Regular'],
+      '13+':    ['Apple SD Gothic Neo ExtraBold', 'STIX Two Math Regular'],
+    },
+    Linux: {
+      'Ubuntu':   ['Ubuntu', 'Chilanka'],
+      'General':  ['Arimo', 'Cousine', 'MONO', 'Noto Color Emoji'],
+      'ChromeOS': ['Jomolhari'],
+      'Android':  ['Dancing Script', 'Droid Sans Mono', 'Roboto'],
+    },
+  };
+
+  const detected = [];
+  for (const [os, groups] of Object.entries(fontDB)) {
+    for (const [ver, fonts] of Object.entries(groups)) {
+      for (const font of fonts) {
+        if (isFontAvailable(font)) detected.push({ font, os, version: ver });
+      }
+    }
+  }
+
+  document.body.removeChild(container);
+
+  const counts = { Windows: 0, macOS: 0, Linux: 0 };
+  for (const d of detected) if (counts[d.os] !== undefined) counts[d.os]++;
+
+  let fontOS = OS.UNKNOWN;
+  const osList = Object.entries(counts).filter(([, c]) => c > 0);
+  if (osList.length === 1) fontOS = osList[0][0];
+  else if (osList.length > 1) fontOS = 'Conflict';
+
+  return { detected, fontOS, counts };
+}
+
+/* --- WEBGL --- */
+function collectWebGL() {
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (!gl) return { supported: false };
+
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const vendor = ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : null;
+    const renderer = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : null;
+
+    let gpuBrand = 'Unknown';
+    if (renderer) {
+      const r = renderer.toLowerCase();
+      gpuBrand = /radeon/i.test(r) ? 'AMD' : /geforce/i.test(r) ? 'NVIDIA' :
+        /(intel|apple|mali|adreno|swiftshader|llvm|vmware|parallels|virtualbox|microsoft|samsung|powervr|amd|nvidia)/i.exec(r)?.[0]?.toUpperCase() || 'Other';
+    }
+
+    let angleValid = null;
+    if (renderer && /^ANGLE/.test(renderer)) angleValid = /^ANGLE \((.+)\)$/.test(renderer);
+
+    let rendererOS = null;
+    if (renderer) {
+      const r = renderer.toLowerCase();
+      if (/mesa|llvmpipe|gallium/.test(r)) rendererOS = OS.LINUX;
+      else if (/angle.*direct3d|d3d/.test(r)) rendererOS = OS.WINDOWS;
+      else if (/apple|metal/.test(r)) rendererOS = OS.MACOS;
+    }
+
+    return { supported: true, vendor, renderer, gpuBrand, angleValid, rendererOS };
+  } catch { return { supported: false }; }
+}
+
+/* --- WORKER --- */
+function collectWorkerScope() {
+  return new Promise(resolve => {
+    const timeout = setTimeout(() => resolve(null), 2000);
+    try {
+      const code = `self.onmessage=function(){const n=self.navigator||{};self.postMessage({platform:n.platform,userAgent:n.userAgent,hardwareConcurrency:n.hardwareConcurrency,deviceMemory:n.deviceMemory||null})};`;
+      const w = new Worker(URL.createObjectURL(new Blob([code], { type: 'application/javascript' })));
+      w.onmessage = e => { clearTimeout(timeout); w.terminate(); resolve(e.data); };
+      w.onerror = () => { clearTimeout(timeout); resolve(null); };
+      w.postMessage(1);
+    } catch { resolve(null); }
+  });
+}
+
+/* --- PROTOTYPE LIES --- */
+function detectLies() {
+  const lies = [];
+  const targets = [
+    ['navigator', 'platform'], ['navigator', 'userAgent'], ['navigator', 'hardwareConcurrency'],
+    ['navigator', 'deviceMemory'], ['navigator', 'languages'], ['screen', 'width'], ['screen', 'height'],
+  ];
+  for (const [obj, prop] of targets) {
+    try {
+      if (Object.getOwnPropertyDescriptor(window[obj], prop))
+        lies.push({ prop: `${obj}.${prop}`, reason: 'own property descriptor on instance' });
+    } catch {}
+    try {
+      const proto = Object.getPrototypeOf(window[obj]);
+      const getter = Object.getOwnPropertyDescriptor(proto, prop);
+      if (getter?.get && !/\[native code\]/.test(Function.prototype.toString.call(getter.get)))
+        lies.push({ prop: `${obj}.${prop}`, reason: 'non-native getter' });
+    } catch {}
+  }
+  return lies;
+}
+
+/* --- SCREEN --- */
+function collectScreen() {
+  const s = screen;
+  return { width: s.width, height: s.height, availWidth: s.availWidth, availHeight: s.availHeight, colorDepth: s.colorDepth, pixelDepth: s.pixelDepth, devicePixelRatio: window.devicePixelRatio };
+}
+
+/* --- TIMEZONE --- */
+function collectTimezone() {
+  const dtf = Intl.DateTimeFormat().resolvedOptions();
+  return { timezone: dtf.timeZone, locale: dtf.locale, offset: new Date().getTimezoneOffset() };
+}
+
+/* --- CANVAS --- */
+function collectCanvas() {
+  try {
+    const c = document.createElement('canvas'); c.width = 280; c.height = 60;
+    const ctx = c.getContext('2d');
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#f60'; ctx.fillRect(100, 1, 62, 20);
+    ctx.fillStyle = '#069'; ctx.font = '11pt "Times New Roman"';
+    ctx.fillText('Cwm fjordbank \ud83d\ude03', 2, 15);
+    ctx.fillStyle = 'rgba(102,204,0,0.7)'; ctx.font = '18pt Arial';
+    ctx.fillText('Cwm fjordbank \ud83d\ude03', 4, 45);
+    const url = c.toDataURL();
+    let h = 0; for (let i = 0; i < url.length; i++) h = ((h << 5) - h + url.charCodeAt(i)) | 0;
+    return { hash: (h >>> 0).toString(16) };
+  } catch { return null; }
+}
+
+/* ============================================================
+   ANALYSIS + OS PROBABILITY
+   ============================================================ */
+function analyze(data) {
+  const errors = [], warnings = [];
+  const { nav, fonts, webgl, worker, engine, lies } = data;
+
+  const osUA = normalizeOS(detectOSFromUA(nav.userAgent));
+  const osPlatform = normalizeOS(detectOSFromPlatform(nav.platform));
+  const osFonts = normalizeOS(fonts.fontOS);
+  const osGL = webgl.rendererOS ? normalizeOS(webgl.rendererOS) : null;
+  const osHints = data.uaClientHints ? normalizeOS(data.uaClientHints.platform) : null;
+
+  // --- Errors ---
+  if (osUA !== osPlatform && osUA !== OS.UNKNOWN && osPlatform !== OS.UNKNOWN)
+    errors.push(`UA claims ${osUA} but platform says ${osPlatform}`);
+
+  if (fonts.fontOS === 'Conflict') {
+    const parts = Object.entries(fonts.counts).filter(([,c]) => c > 0).map(([o,c]) => `${o}: ${c}`).join(', ');
+    errors.push(`Fonts from multiple OS families (${parts})`);
+  } else if (osFonts !== OS.UNKNOWN && osFonts !== osUA) {
+    errors.push(`Fonts suggest ${osFonts} but UA claims ${osUA}`);
+  }
+
+  if (osGL && osGL !== osUA)
+    errors.push(`WebGL renderer suggests ${osGL} but UA claims ${osUA}`);
+
+  if (osHints && osHints !== osUA)
+    errors.push(`Client Hints platform (${osHints}) differs from UA (${osUA})`);
+
+  if (worker) {
+    if (worker.platform !== nav.platform)
+      errors.push(`Worker platform "${worker.platform}" differs from window "${nav.platform}"`);
+    if (worker.hardwareConcurrency !== nav.hardwareConcurrency)
+      warnings.push(`Worker hardwareConcurrency (${worker.hardwareConcurrency}) differs from window (${nav.hardwareConcurrency})`);
+    if (normalizeOS(detectOSFromUA(worker.userAgent)) !== osUA)
+      errors.push('Worker UA OS differs from window UA OS');
+  }
+
+  for (const lie of lies)
+    errors.push(`Prototype tampered: ${lie.prop} (${lie.reason})`);
+
+  if (nav.oscpu && normalizeOS(nav.oscpu) !== osPlatform)
+    errors.push(`oscpu "${nav.oscpu}" inconsistent with platform "${nav.platform}"`);
+
+  if (engine.engine === 'Gecko' && nav.vendor !== '')
+    warnings.push(`Gecko engine but vendor is "${nav.vendor}" (expected empty)`);
+  if (engine.engine === 'Chromium' && !/google/i.test(nav.vendor))
+    warnings.push(`Chromium engine but vendor is "${nav.vendor}"`);
+  if (nav.webdriver)
+    warnings.push('navigator.webdriver is true');
+
+  // --- OS probability (weighted voting) ---
+  const votes = {};
+  function vote(os, weight) { if (os && os !== OS.UNKNOWN) votes[os] = (votes[os] || 0) + weight; }
+
+  vote(osUA, 2);
+  vote(osPlatform, 2);
+  vote(osFonts, 3);     // fonts are hardest to spoof
+  if (osGL) vote(osGL, 2);
+  if (osHints) vote(osHints, 2);
+  if (worker) vote(normalizeOS(detectOSFromPlatform(worker.platform)), 1);
+
+  const totalWeight = Object.values(votes).reduce((a, b) => a + b, 0) || 1;
+  const probabilities = {};
+  for (const [os, w] of Object.entries(votes)) probabilities[os] = Math.round((w / totalWeight) * 100);
+
+  const sorted = Object.entries(probabilities).sort((a, b) => b[1] - a[1]);
+  const detectedOS = sorted[0]?.[0] || OS.UNKNOWN;
+  const rawConfidence = sorted[0]?.[1] || 0;
+  const confidence = Math.max(0, rawConfidence - (errors.length * 10));
+
+  const score = Math.max(0, 100 - (errors.length * 15) - (warnings.length * 5));
+  const grade = score >= 90 ? 'A' : score >= 75 ? 'B' : score >= 60 ? 'C' : score >= 40 ? 'D' : 'F';
+
+  return { errors, warnings, score, grade, detectedOS, confidence, probabilities, vectors: { ua: osUA, platform: osPlatform, fonts: osFonts, webgl: osGL, clientHints: osHints } };
+}
+
+/* ============================================================
+   MAIN
+   ============================================================ */
+async function main() {
+  const t0 = performance.now();
+
+  const nav = collectNavigator();
+  const uaClientHints = await collectUAClientHints();
+  const engine = detectEngine();
+  const fonts = detectOSFonts();
+  const webgl = collectWebGL();
+  const screenData = collectScreen();
+  const tz = collectTimezone();
+  const worker = await collectWorkerScope();
+  const lies = detectLies();
+  const canvas = collectCanvas();
+
+  const elapsed = Math.round(performance.now() - t0);
+  const result = analyze({ nav, uaClientHints, fonts, webgl, worker, engine, lies });
+
+  // Hidden scrapable fields
+  document.getElementById('detected-os').textContent = result.detectedOS;
+  document.getElementById('os-confidence').textContent = result.confidence;
+  document.getElementById('score').textContent = result.score;
+  document.getElementById('grade').textContent = result.grade;
+  document.getElementById('error-count').textContent = result.errors.length;
+  document.getElementById('warning-count').textContent = result.warnings.length;
+
+  render({ result, nav, uaClientHints, engine, fonts, webgl, screenData, tz, worker, lies, canvas, elapsed });
+
+  window.__OS_FP_RESULT__ = { result, nav, engine, fonts, webgl, screenData, tz, worker, lies, canvas };
+  document.title = 'FP_READY';
+}
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+function h(str) { return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function row(id, label, value, cls = '', extra = '') {
+  return `<div class="row" data-prop="${h(id)}" ${extra}><span class="k">${h(label)}</span><span class="v ${cls}">${h(value)}</span></div>`;
+}
+
+function render(d) {
+  const { result, nav, uaClientHints, engine, fonts, webgl, screenData, tz, worker, lies, canvas, elapsed } = d;
+
+  // --- Header ---
+  const scoreCls = result.score >= 90 ? 'pass' : result.score >= 60 ? 'warn' : 'fail';
+  const gradeCls = result.grade === 'A' ? 'pass' : result.grade <= 'C' ? 'warn' : 'fail';
+  document.getElementById('score-display').className = `score ${scoreCls}`;
+  document.getElementById('score-display').textContent = `${result.score}/100`;
+  document.getElementById('grade-display').innerHTML = ` <span class="badge badge-${gradeCls}">${result.grade}</span>`;
+  document.getElementById('meta-display').textContent = `${elapsed}ms`;
+
+  // --- Verdict ---
+  const confColor = result.confidence >= 80 ? '#4cda6a' : result.confidence >= 50 ? '#ffb84c' : '#ff4c6a';
+  const probBars = Object.entries(result.probabilities).sort((a, b) => b[1] - a[1]).map(([os, pct]) =>
+    `<div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+       <span style="width:70px;font-size:12px;color:#7a7a8e;">${os}</span>
+       <div class="bar" style="flex:1;"><div class="bar-fill" style="width:${pct}%;background:${os === result.detectedOS ? confColor : '#555568'};"></div></div>
+       <span style="font-size:12px;width:36px;text-align:right;">${pct}%</span>
+     </div>`
+  ).join('');
+
+  const vectorMap = {
+    'user-agent': result.vectors.ua,
+    'platform': result.vectors.platform,
+    'fonts': result.vectors.fonts,
+    'webgl': result.vectors.webgl,
+    'client-hints': result.vectors.clientHints,
+  };
+  const vectorRows = Object.entries(vectorMap).map(([k, v]) => {
+    if (!v) return `<div style="display:flex;padding:2px 0;"><span style="width:120px;font-size:12px;color:#7a7a8e;">${k}</span><span class="muted" style="font-size:12px;">N/A</span></div>`;
+    const match = v === result.detectedOS;
+    return `<div style="display:flex;padding:2px 0;"><span style="width:120px;font-size:12px;color:#7a7a8e;">${k}</span><span class="${match ? 'pass' : 'fail'}" style="font-size:12px;">${v}</span></div>`;
+  }).join('');
+
+  document.getElementById('verdict').innerHTML = `
+    <div class="os-box">
+      <div class="os-label">Detected OS</div>
+      <div class="os-value" id="verdict-os">${result.detectedOS}</div>
+      <div class="os-confidence">Confidence: <strong style="color:${confColor}">${result.confidence}%</strong></div>
+    </div>
+    <div class="os-box" style="flex:1;max-width:400px;">
+      <div class="os-label">Probability Distribution</div>
+      ${probBars}
+    </div>
+    <div class="os-box">
+      <div class="os-label">Vectors Agreement</div>
+      <div style="margin-top:6px;">${vectorRows}</div>
+    </div>`;
+
+  // --- Sections ---
+  let out = '';
+
+  // Validation
+  out += `<div class="section" id="section-validation"><div class="section-title">Consistency Checks <span class="badge badge-${result.errors.length ? 'fail' : 'pass'}">${result.errors.length} errors, ${result.warnings.length} warnings</span></div><div class="section-body">`;
+  if (!result.errors.length && !result.warnings.length) out += '<div class="pass">All checks passed</div>';
+  for (const e of result.errors) out += `<div class="row error"><span class="k fail">ERROR</span><span class="v fail">${h(e)}</span></div>`;
+  for (const w of result.warnings) out += `<div class="row warning"><span class="k warn">WARN</span><span class="v warn">${h(w)}</span></div>`;
+  out += '</div></div>';
+
+  // OS Vectors
+  out += `<div class="section" id="section-vectors"><div class="section-title">OS Detection Vectors</div><div class="section-body">`;
+  for (const [id, val] of Object.entries(vectorMap))
+    out += `<div class="row" data-vector="${id}"><span class="k">${id}</span><span class="v">${val || 'N/A'}</span></div>`;
+  out += '</div></div>';
+
+  // Navigator
+  out += `<div class="section" id="section-navigator"><div class="section-title">Navigator</div><div class="section-body">`;
+  out += row('platform', 'platform', nav.platform);
+  out += row('oscpu', 'oscpu', nav.oscpu ?? 'N/A');
+  out += row('userAgent', 'userAgent', nav.userAgent);
+  out += row('vendor', 'vendor', nav.vendor || '(empty)');
+  out += row('hardwareConcurrency', 'hardwareConcurrency', nav.hardwareConcurrency);
+  out += row('deviceMemory', 'deviceMemory', nav.deviceMemory ?? 'N/A');
+  out += row('maxTouchPoints', 'maxTouchPoints', nav.maxTouchPoints);
+  out += row('languages', 'languages', JSON.stringify(nav.languages));
+  out += row('webdriver', 'webdriver', nav.webdriver, nav.webdriver ? 'fail' : 'pass');
+  out += '</div></div>';
+
+  // Client Hints
+  if (uaClientHints) {
+    out += `<div class="section" id="section-hints"><div class="section-title">UA Client Hints</div><div class="section-body">`;
+    out += row('hints-platform', 'platform', uaClientHints.platform);
+    out += row('hints-platformVersion', 'platformVersion', uaClientHints.platformVersion);
+    out += row('hints-architecture', 'architecture', uaClientHints.architecture);
+    out += row('hints-bitness', 'bitness', uaClientHints.bitness);
+    out += row('hints-mobile', 'mobile', uaClientHints.mobile);
+    out += row('hints-brands', 'brands', uaClientHints.brands.join(', '));
+    out += '</div></div>';
+  }
+
+  // Engine
+  out += `<div class="section" id="section-engine"><div class="section-title">Engine Detection (UA-independent)</div><div class="section-body">`;
+  out += row('engine', 'engine', engine.engine);
+  out += row('vendor-flavors', 'vendor flavors', engine.vendorFlavors.join(', ') || 'none');
+  out += '</div></div>';
+
+  // Fonts
+  out += `<div class="section" id="section-fonts"><div class="section-title">Font Detection <span class="muted">${fonts.detected.length} OS-specific fonts</span></div><div class="section-body">`;
+  if (!fonts.detected.length) out += '<div class="muted">No OS-specific fonts detected</div>';
+  for (const f of fonts.detected) {
+    const tagCls = `tag-${f.os.toLowerCase().replace(/\s/g, '')}`;
+    out += `<div class="row" data-font="${h(f.font)}"><span class="k">${h(f.font)}</span><span class="v"><span class="tag ${tagCls}">${h(f.os)}</span> <span class="muted">${h(f.version)}</span></span></div>`;
+  }
+  out += '</div></div>';
+
+  // WebGL
+  out += `<div class="section" id="section-webgl"><div class="section-title">WebGL</div><div class="section-body">`;
+  out += row('unmasked-vendor', 'Unmasked Vendor', webgl.vendor || 'N/A');
+  out += row('unmasked-renderer', 'Unmasked Renderer', webgl.renderer || 'N/A');
+  out += row('gpu-brand', 'GPU Brand', webgl.gpuBrand || 'N/A');
+  out += row('angle-valid', 'ANGLE valid', webgl.angleValid === null ? 'N/A' : String(webgl.angleValid), webgl.angleValid === false ? 'fail' : '');
+  out += row('renderer-os', 'Renderer OS hint', webgl.rendererOS || 'N/A');
+  out += '</div></div>';
+
+  // Screen
+  out += `<div class="section" id="section-screen"><div class="section-title">Screen</div><div class="section-body">`;
+  out += row('width', 'width', screenData.width);
+  out += row('height', 'height', screenData.height);
+  out += row('availWidth', 'availWidth', screenData.availWidth);
+  out += row('availHeight', 'availHeight', screenData.availHeight);
+  out += row('colorDepth', 'colorDepth', screenData.colorDepth);
+  out += row('devicePixelRatio', 'devicePixelRatio', screenData.devicePixelRatio);
+  out += '</div></div>';
+
+  // Timezone
+  out += `<div class="section" id="section-timezone"><div class="section-title">Timezone</div><div class="section-body">`;
+  out += row('timezone', 'timezone', tz.timezone);
+  out += row('locale', 'locale', tz.locale);
+  out += row('offset', 'offset (min)', tz.offset);
+  out += '</div></div>';
+
+  // Canvas
+  if (canvas) {
+    out += `<div class="section" id="section-canvas"><div class="section-title">Canvas</div><div class="section-body">`;
+    out += row('hash', 'hash', canvas.hash);
+    out += '</div></div>';
+  }
+
+  // Worker
+  if (worker) {
+    out += `<div class="section" id="section-worker"><div class="section-title">Worker Scope Comparison</div><div class="section-body">`;
+    const pMatch = worker.platform === nav.platform;
+    const hMatch = worker.hardwareConcurrency === nav.hardwareConcurrency;
+    out += row('worker-platform', 'platform', `window: ${nav.platform} / worker: ${worker.platform}`, pMatch ? 'pass' : 'fail');
+    out += row('worker-concurrency', 'hardwareConcurrency', `window: ${nav.hardwareConcurrency} / worker: ${worker.hardwareConcurrency}`, hMatch ? 'pass' : 'fail');
+    out += '</div></div>';
+  }
+
+  // Lies
+  if (lies.length) {
+    out += `<div class="section" id="section-lies"><div class="section-title">Prototype Lies <span class="badge badge-fail">${lies.length}</span></div><div class="section-body">`;
+    for (const l of lies) out += `<div class="row" data-lie="${h(l.prop)}"><span class="k fail">${h(l.prop)}</span><span class="v fail">${h(l.reason)}</span></div>`;
+    out += '</div></div>';
+  }
+
+  document.getElementById('results').innerHTML = out;
+}
+
+main().catch(e => {
+  document.getElementById('results').innerHTML = `<div class="fail" style="padding:24px;">Error: ${e.message}</div>`;
+  console.error(e);
+});
+</script>
+</body>
+</html>

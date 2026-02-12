@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Screenshot Test{% endblock %}
+{% block extra_css %}
+  .color-block { padding: 30px; margin: 10px 0; border-radius: 8px; color: #fff; font-weight: bold; font-size: 1.2rem; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 10px 0; }
+  .grid-cell { padding: 20px; text-align: center; border-radius: 6px; font-weight: 600; }
+{% endblock %}
+
+{% block content %}
+<h1>Screenshot Test</h1>
+<p>A colorful page designed to verify <code>take_screenshot</code> (viewport and full-page modes).</p>
+
+<div class="color-block" style="background:#1565c0;">Blue Banner — Section 1</div>
+
+<div class="grid">
+  <div class="grid-cell" style="background:#e53935; color:#fff;">Red</div>
+  <div class="grid-cell" style="background:#43a047; color:#fff;">Green</div>
+  <div class="grid-cell" style="background:#fb8c00; color:#fff;">Orange</div>
+  <div class="grid-cell" style="background:#8e24aa; color:#fff;">Purple</div>
+  <div class="grid-cell" style="background:#00acc1; color:#fff;">Cyan</div>
+  <div class="grid-cell" style="background:#d81b60; color:#fff;">Pink</div>
+</div>
+
+<div class="color-block" style="background:#2e7d32;">Green Banner — Section 2</div>
+
+<div class="section">
+  <h2>Shapes via CSS</h2>
+  <div style="display:flex; gap:20px; align-items:center; padding:10px;">
+    <div style="width:60px; height:60px; background:#f44336; border-radius:50%;"></div>
+    <div style="width:60px; height:60px; background:#2196f3;"></div>
+    <div style="width:0; height:0; border-left:30px solid transparent; border-right:30px solid transparent; border-bottom:60px solid #ff9800;"></div>
+    <div style="width:60px; height:60px; background:#4caf50; border-radius:10px; transform:rotate(45deg);"></div>
+  </div>
+</div>
+
+<div class="color-block" style="background:#6a1b9a;">Purple Banner — Section 3</div>
+
+<div class="section">
+  <h2>Text Samples</h2>
+  <p style="font-size:2rem; font-weight:bold;">Large Bold Text</p>
+  <p style="font-size:0.8rem; color:#999;">Small gray text for contrast testing</p>
+  <p style="font-style:italic; color:#333;">Italic paragraph for variety</p>
+  <p><strong>Bold</strong>, <em>italic</em>, <u>underline</u>, <code>monospace</code></p>
+</div>
+
+<div class="color-block" style="background:#e65100;">Orange Banner — Section 4</div>
+
+<div class="grid">
+  <div class="grid-cell" style="background:#263238; color:#fff;">Dark</div>
+  <div class="grid-cell" style="background:#fdd835; color:#333;">Yellow</div>
+  <div class="grid-cell" style="background:#78909c; color:#fff;">Gray</div>
+</div>
+
+<div class="section">
+  <h2>Gradient</h2>
+  <div style="height:60px; border-radius:8px; background:linear-gradient(90deg, #f44336, #ff9800, #ffeb3b, #4caf50, #2196f3, #9c27b0);"></div>
+</div>
+
+<div class="color-block" style="background:#00695c;">Teal Banner — Bottom</div>
+<p style="text-align:center; padding:20px; color:#888;">End of screenshot test page</p>
+{% endblock %}

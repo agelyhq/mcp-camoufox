@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Evaluate Test{% endblock %}
+{% block content %}
+<h1>Evaluate Test</h1>
+<p>This page exposes JS variables and DOM data for testing the <code>evaluate</code> tool.</p>
+
+<div class="section">
+  <h2>Page Data</h2>
+  <div id="data-holder"
+       data-user="Alice"
+       data-role="admin"
+       data-score="42">
+    Element with data attributes (user=Alice, role=admin, score=42)
+  </div>
+</div>
+
+<div class="section">
+  <h2>Dynamic Counter</h2>
+  <p>Current count: <span id="eval-counter">0</span></p>
+  <button onclick="window._counter = (window._counter || 0) + 1; document.getElementById('eval-counter').textContent = window._counter;">
+    Increment
+  </button>
+</div>
+
+<div class="section">
+  <h2>Computed Values</h2>
+  <ul id="computed-list">
+    <li>document.title</li>
+    <li>window.location.pathname</li>
+    <li>document.querySelectorAll('button').length</li>
+    <li>JSON.parse(document.getElementById('json-block').textContent)</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>JSON Block</h2>
+  <pre id="json-block">{"items": ["foo", "bar", "baz"], "count": 3}</pre>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.testConfig = {
+    appName: "MCP Test Server",
+    version: "1.0.0",
+    features: ["click", "fill", "evaluate", "scroll"]
+  };
+  window._counter = 0;
+</script>
+{% endblock %}

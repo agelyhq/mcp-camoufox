@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Profile Test{% endblock %}
+{% block content %}
+<h1>Profile Test</h1>
+<p id="session-id">Loading...</p>
+{% endblock %}
+{% block extra_js %}
+<script>
+function getCookie(name) {
+  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+  return match ? match[2] : null;
+}
+function setCookie(name, value) {
+  document.cookie = name + '=' + value + '; path=/; max-age=31536000';
+}
+function uuidv4() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+let sid = getCookie('session_id');
+if (!sid) {
+  sid = uuidv4();
+  setCookie('session_id', sid);
+}
+document.getElementById('session-id').textContent = sid;
+</script>
+{% endblock %}

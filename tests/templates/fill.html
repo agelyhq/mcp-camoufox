@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Fill Test{% endblock %}
+{% block content %}
+<h1>Fill Test</h1>
+
+<div class="section">
+  <h2>Text Input</h2>
+  <label for="text-input">Name</label>
+  <input type="text" id="text-input" placeholder="Type your name...">
+  <div id="text-output" class="output">Input value: (empty)</div>
+</div>
+
+<div class="section">
+  <h2>Email Input</h2>
+  <label for="email-input">Email</label>
+  <input type="email" id="email-input" placeholder="user@example.com">
+  <div id="email-output" class="output">Email value: (empty)</div>
+  <div id="email-validity" class="output">Valid: —</div>
+</div>
+
+<div class="section">
+  <h2>Textarea</h2>
+  <label for="textarea-input">Message</label>
+  <textarea id="textarea-input" placeholder="Write something..."></textarea>
+  <div id="textarea-output" class="output">Textarea value: (empty)</div>
+</div>
+
+<div class="section">
+  <h2>Content Editable</h2>
+  <div id="editable" contenteditable="true" style="border:1px solid #aaa; padding:8px; border-radius:4px; min-height:40px;">Edit this text</div>
+  <div id="editable-output" class="output">Editable content: Edit this text</div>
+</div>
+
+<div class="section">
+  <h2>Select Dropdown</h2>
+  <label for="select-input">Choose option</label>
+  <select id="select-input">
+    <option value="">-- Select --</option>
+    <option value="apple">Apple</option>
+    <option value="banana">Banana</option>
+    <option value="cherry">Cherry</option>
+  </select>
+  <div id="select-output" class="output">Selected: (none)</div>
+</div>
+
+<div class="section">
+  <h2>Form Submit</h2>
+  <form id="test-form" onsubmit="return false;">
+    <label for="form-name">Name</label>
+    <input type="text" id="form-name" name="name">
+    <label for="form-email">Email</label>
+    <input type="email" id="form-email" name="email">
+    <br><br>
+    <button type="submit" id="form-submit">Submit</button>
+  </form>
+  <div id="form-output" class="output">Form not submitted</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  document.getElementById('text-input').addEventListener('input', function() {
+    document.getElementById('text-output').textContent = 'Input value: ' + this.value;
+  });
+  document.getElementById('email-input').addEventListener('input', function() {
+    document.getElementById('email-output').textContent = 'Email value: ' + this.value;
+    document.getElementById('email-validity').textContent = 'Valid: ' + this.checkValidity();
+  });
+  document.getElementById('textarea-input').addEventListener('input', function() {
+    document.getElementById('textarea-output').textContent = 'Textarea value: ' + this.value;
+  });
+  document.getElementById('editable').addEventListener('input', function() {
+    document.getElementById('editable-output').textContent = 'Editable content: ' + this.textContent;
+  });
+  document.getElementById('select-input').addEventListener('change', function() {
+    document.getElementById('select-output').textContent = 'Selected: ' + this.value;
+  });
+  document.getElementById('test-form').addEventListener('submit', function() {
+    var name = document.getElementById('form-name').value;
+    var email = document.getElementById('form-email').value;
+    document.getElementById('form-output').textContent = 'Submitted: name=' + name + ', email=' + email;
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>MCP Tool Test Pages</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; line-height: 1.6; padding: 30px; max-width: 700px; margin: 0 auto; color: #222; }
+    h1 { margin-bottom: 8px; }
+    p.sub { color: #666; margin-bottom: 24px; }
+    ul { list-style: none; }
+    li { margin-bottom: 6px; }
+    li a { display: inline-block; padding: 4px 0; color: #0066cc; text-decoration: none; font-size: 1rem; }
+    li a:hover { text-decoration: underline; }
+    .tool { color: #888; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>MCP Tool Test Pages</h1>
+  <p class="sub">Each page is designed to exercise one or more Camoufox MCP tools.</p>
+  <ul>
+    <li><a href="/click">Click</a> <span class="tool">— click, double-click</span></li>
+    <li><a href="/fill">Fill</a> <span class="tool">— fill text input, textarea, contenteditable, select</span></li>
+    <li><a href="/evaluate">Evaluate</a> <span class="tool">— evaluate JS expressions</span></li>
+    <li><a href="/press-key">Press Key</a> <span class="tool">— press_key (arrows, Enter, combos)</span></li>
+    <li><a href="/scroll">Scroll</a> <span class="tool">— scroll (long page, sections)</span></li>
+    <li><a href="/upload">Upload</a> <span class="tool">— upload_file</span></li>
+    <li><a href="/wait-for">Wait For</a> <span class="tool">— wait_for (delayed elements)</span></li>
+    <li><a href="/dialog">Dialog</a> <span class="tool">— handle_dialog (alert, confirm, prompt)</span></li>
+    <li><a href="/screenshot">Screenshot</a> <span class="tool">— take_screenshot (colorful, scrollable)</span></li>
+    <li><a href="/snapshot">Snapshot</a> <span class="tool">— take_snapshot (varied ARIA roles)</span></li>
+    <li><a href="/network">Network</a> <span class="tool">— list_network_requests, get_network_request (AJAX)</span></li>
+    <li><a href="/infinite-scroll">Infinite Scroll</a> <span class="tool">— scroll, wait_for, list_network_requests (AJAX pagination)</span></li>
+  </ul>
+</body>
+</html>

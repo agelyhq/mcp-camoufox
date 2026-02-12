@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Wait For Test{% endblock %}
+{% block content %}
+<h1>Wait For Test</h1>
+<p>Elements appear after various delays — use <code>wait_for(condition='selector', selector='...')</code> to test.</p>
+
+<div class="section">
+  <h2>Appears after 3 seconds</h2>
+  <p>Selector: <code>#delayed-3s</code></p>
+  <div id="placeholder-3s">Waiting...</div>
+</div>
+
+<div class="section">
+  <h2>Appears after 5 seconds</h2>
+  <p>Selector: <code>#delayed-5s</code></p>
+  <div id="placeholder-5s">Waiting...</div>
+</div>
+
+<div class="section">
+  <h2>Appears after 8 seconds</h2>
+  <p>Selector: <code>#delayed-8s</code></p>
+  <div id="placeholder-8s">Waiting...</div>
+</div>
+
+<div class="section">
+  <h2>Click to Reveal (manual trigger)</h2>
+  <button id="reveal-btn" onclick="
+    var self = this;
+    self.disabled = true;
+    self.textContent = 'Loading...';
+    setTimeout(function() {
+      document.getElementById('reveal-target').style.display = 'block';
+      self.textContent = 'Revealed!';
+    }, 4000);
+  ">Show element in 4s</button>
+  <div id="reveal-target" style="display:none; margin-top:10px; padding:10px; background:#c8e6c9; border-radius:4px;">
+    This element was revealed after clicking the button.
+  </div>
+</div>
+
+<div class="section">
+  <h2>Timer</h2>
+  <div id="timer" class="output">Elapsed: 0s</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  var start = Date.now();
+  setInterval(function() {
+    var s = Math.floor((Date.now() - start) / 1000);
+    document.getElementById('timer').textContent = 'Elapsed: ' + s + 's';
+  }, 500);
+
+  setTimeout(function() {
+    var el = document.createElement('div');
+    el.id = 'delayed-3s';
+    el.style.cssText = 'padding:10px; background:#bbdefb; border-radius:4px; margin-top:8px;';
+    el.textContent = 'Element appeared after 3 seconds!';
+    document.getElementById('placeholder-3s').replaceWith(el);
+  }, 3000);
+
+  setTimeout(function() {
+    var el = document.createElement('div');
+    el.id = 'delayed-5s';
+    el.style.cssText = 'padding:10px; background:#e1bee7; border-radius:4px; margin-top:8px;';
+    el.textContent = 'Element appeared after 5 seconds!';
+    document.getElementById('placeholder-5s').replaceWith(el);
+  }, 5000);
+
+  setTimeout(function() {
+    var el = document.createElement('div');
+    el.id = 'delayed-8s';
+    el.style.cssText = 'padding:10px; background:#ffe0b2; border-radius:4px; margin-top:8px;';
+    el.textContent = 'Element appeared after 8 seconds!';
+    document.getElementById('placeholder-8s').replaceWith(el);
+  }, 8000);
+</script>
+{% endblock %}

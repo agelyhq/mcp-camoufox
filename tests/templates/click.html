@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Click Test{% endblock %}
+{% block content %}
+<h1>Click Test</h1>
+
+<div class="section">
+  <h2>Single Click</h2>
+  <button id="btn-single" onclick="document.getElementById('click-output').textContent = 'Single click detected at ' + new Date().toLocaleTimeString()">
+    Click me
+  </button>
+  <div id="click-output" class="output">No click yet</div>
+</div>
+
+<div class="section">
+  <h2>Double Click</h2>
+  <button id="btn-double" ondblclick="document.getElementById('dblclick-output').textContent = 'Double click detected at ' + new Date().toLocaleTimeString()">
+    Double-click me
+  </button>
+  <div id="dblclick-output" class="output">No double-click yet</div>
+</div>
+
+<div class="section">
+  <h2>Click Counter</h2>
+  <button id="btn-counter" onclick="
+    var el = document.getElementById('counter-output');
+    var n = parseInt(el.dataset.count || '0') + 1;
+    el.dataset.count = n;
+    el.textContent = 'Clicked ' + n + ' time(s)';
+  ">
+    Count clicks
+  </button>
+  <div id="counter-output" class="output" data-count="0">Clicked 0 time(s)</div>
+</div>
+
+<div class="section">
+  <h2>Link Click</h2>
+  <a id="link-test" href="#clicked" onclick="document.getElementById('link-output').textContent = 'Link clicked'">Test link</a>
+  <div id="link-output" class="output">Link not clicked</div>
+</div>
+
+<div class="section">
+  <h2>Checkbox &amp; Radio</h2>
+  <label><input type="checkbox" id="chk1" onchange="document.getElementById('check-output').textContent = 'Checkbox: ' + (this.checked ? 'checked' : 'unchecked')"> Option A</label>
+  <label><input type="radio" name="radio-group" value="X" onchange="document.getElementById('check-output').textContent = 'Radio: X selected'"> Radio X</label>
+  <label><input type="radio" name="radio-group" value="Y" onchange="document.getElementById('check-output').textContent = 'Radio: Y selected'"> Radio Y</label>
+  <div id="check-output" class="output">No selection</div>
+</div>
+{% endblock %}

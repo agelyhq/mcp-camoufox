@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Snapshot Test{% endblock %}
+{% block content %}
+<h1>Snapshot Test</h1>
+<p>Page with varied ARIA roles and semantic HTML to test <code>take_snapshot</code> (accessibility tree).</p>
+
+<nav aria-label="Test navigation">
+  <a href="#section-form">Form</a> |
+  <a href="#section-table">Table</a> |
+  <a href="#section-list">List</a> |
+  <a href="#section-misc">Misc</a>
+</nav>
+
+<div class="section" id="section-form">
+  <h2>Form Elements</h2>
+  <form>
+    <label for="snap-name">Name</label>
+    <input type="text" id="snap-name" placeholder="Your name" aria-required="true">
+
+    <label for="snap-email">Email</label>
+    <input type="email" id="snap-email" placeholder="you@example.com">
+
+    <label for="snap-select">Role</label>
+    <select id="snap-select">
+      <option value="user">User</option>
+      <option value="admin">Admin</option>
+      <option value="editor">Editor</option>
+    </select>
+
+    <label><input type="checkbox" id="snap-agree"> I agree to terms</label>
+
+    <label for="snap-notes">Notes</label>
+    <textarea id="snap-notes" placeholder="Additional notes..."></textarea>
+
+    <br><br>
+    <button type="button" id="snap-submit">Submit</button>
+    <button type="button" id="snap-cancel" disabled>Cancel (disabled)</button>
+  </form>
+</div>
+
+<div class="section" id="section-table">
+  <h2>Data Table</h2>
+  <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; width:100%;" aria-label="User data">
+    <thead>
+      <tr><th>ID</th><th>Name</th><th>Email</th><th>Role</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>Alice</td><td>alice@example.com</td><td>Admin</td></tr>
+      <tr><td>2</td><td>Bob</td><td>bob@example.com</td><td>User</td></tr>
+      <tr><td>3</td><td>Carol</td><td>carol@example.com</td><td>Editor</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="section" id="section-list">
+  <h2>Lists</h2>
+  <h3>Unordered</h3>
+  <ul>
+    <li>First item</li>
+    <li>Second item with <a href="#nested">a link</a></li>
+    <li>Third item</li>
+  </ul>
+  <h3>Ordered</h3>
+  <ol>
+    <li>Step one</li>
+    <li>Step two</li>
+    <li>Step three</li>
+  </ol>
+  <h3>Definition List</h3>
+  <dl>
+    <dt>MCP</dt><dd>Model Context Protocol</dd>
+    <dt>UID</dt><dd>Unique Identifier for DOM elements</dd>
+  </dl>
+</div>
+
+<div class="section" id="section-misc">
+  <h2>Miscellaneous</h2>
+
+  <details>
+    <summary>Expandable section</summary>
+    <p>Hidden content revealed when expanded.</p>
+  </details>
+
+  <div role="alert" style="padding:10px; background:#fff3cd; border:1px solid #ffc107; border-radius:4px; margin:10px 0;">
+    Warning: This is an alert role element.
+  </div>
+
+  <div role="status" aria-live="polite" style="padding:10px; background:#d4edda; border:1px solid #28a745; border-radius:4px; margin:10px 0;">
+    Status: All systems operational.
+  </div>
+
+  <progress value="65" max="100" style="width:200px;"></progress>
+  <span>65%</span>
+
+  <br><br>
+  <div role="img" aria-label="Placeholder image description" style="width:200px; height:100px; background:#ddd; display:flex; align-items:center; justify-content:center; border-radius:4px; color:#666;">
+    [image placeholder]
+  </div>
+</div>
+{% endblock %}

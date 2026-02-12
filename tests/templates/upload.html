@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Upload Test{% endblock %}
+{% block content %}
+<h1>Upload Test</h1>
+
+<div class="section">
+  <h2>Basic File Upload</h2>
+  <p>Select a file — it uploads automatically to the server and shows the response.</p>
+  <label for="file-basic">Choose a file</label>
+  <input type="file" id="file-basic" name="file">
+  <div id="file-basic-output" class="output">No file selected</div>
+</div>
+
+<div class="section">
+  <h2>Image Upload</h2>
+  <p>Restricted to image types (.png, .jpg, .gif). Uploads on selection.</p>
+  <label for="file-image">Choose an image</label>
+  <input type="file" id="file-image" name="file" accept="image/png,image/jpeg,image/gif">
+  <div id="file-image-output" class="output">No image selected</div>
+</div>
+
+<div class="section">
+  <h2>Upload via Form Button</h2>
+  <form id="upload-form" enctype="multipart/form-data" onsubmit="return false;">
+    <label for="file-form">File</label>
+    <input type="file" id="file-form" name="file">
+    <br><br>
+    <button type="submit" id="upload-submit">Upload</button>
+  </form>
+  <div id="upload-form-output" class="output">Select a file and click Upload</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  function uploadAndShow(input, outputId) {
+    input.addEventListener('change', function() {
+      var out = document.getElementById(outputId);
+      if (!this.files.length) { out.textContent = 'No file selected'; return; }
+      out.textContent = 'Uploading ' + this.files[0].name + '...';
+      var fd = new FormData();
+      fd.append('file', this.files[0]);
+      fetch('/api/upload', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          out.textContent = 'Server response:\n' + JSON.stringify(data, null, 2);
+        })
+        .catch(function(err) {
+          out.textContent = 'Upload error: ' + err;
+        });
+    });
+  }
+  uploadAndShow(document.getElementById('file-basic'), 'file-basic-output');
+  uploadAndShow(document.getElementById('file-image'), 'file-image-output');
+
+  document.getElementById('upload-form').addEventListener('submit', function() {
+    var fileInput = document.getElementById('file-form');
+    var out = document.getElementById('upload-form-output');
+    if (!fileInput.files.length) { out.textContent = 'Error: no file selected'; return; }
+    out.textContent = 'Uploading ' + fileInput.files[0].name + '...';
+    var fd = new FormData(this);
+    fetch('/api/upload', { method: 'POST', body: fd })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        out.textContent = 'Server response:\n' + JSON.stringify(data, null, 2);
+      })
+      .catch(function(err) {
+        out.textContent = 'Upload error: ' + err;
+      });
+  });
+</script>
+{% endblock %}

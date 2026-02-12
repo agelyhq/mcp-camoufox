@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Press Key Test{% endblock %}
+{% block extra_css %}
+  #key-display { font-size: 2rem; text-align: center; padding: 30px; border: 2px solid #ccc; border-radius: 8px; margin: 10px 0; background: #fafafa; }
+  #key-log { max-height: 200px; overflow-y: auto; }
+{% endblock %}
+
+{% block content %}
+<h1>Press Key Test</h1>
+<p>Press any key — arrow keys, Enter, Escape, combos (Ctrl+A, Shift+Enter, etc.).</p>
+
+<div class="section">
+  <h2>Last Key Pressed</h2>
+  <div id="key-display">—</div>
+</div>
+
+<div class="section">
+  <h2>Key Details</h2>
+  <div id="key-details" class="output">Waiting for keypress...</div>
+</div>
+
+<div class="section">
+  <h2>Arrow Key Movement</h2>
+  <p>Use arrow keys to move the marker:</p>
+  <div style="position:relative; width:300px; height:200px; border:1px solid #ccc; border-radius:4px; background:#f9f9f9;">
+    <div id="marker" style="position:absolute; left:140px; top:90px; width:20px; height:20px; background:#0066cc; border-radius:50%;"></div>
+  </div>
+  <div id="position-output" class="output">Position: (140, 90)</div>
+</div>
+
+<div class="section">
+  <h2>Key Log</h2>
+  <div id="key-log" class="output">No keys pressed yet</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  var logLines = [];
+  var mx = 140, my = 90;
+
+  document.addEventListener('keydown', function(e) {
+    e.preventDefault();
+
+    var parts = [];
+    if (e.ctrlKey) parts.push('Ctrl');
+    if (e.altKey) parts.push('Alt');
+    if (e.shiftKey) parts.push('Shift');
+    if (e.metaKey) parts.push('Meta');
+    parts.push(e.key);
+    var combo = parts.join('+');
+
+    document.getElementById('key-display').textContent = combo;
+    document.getElementById('key-details').textContent =
+      'key: ' + e.key + '\ncode: ' + e.code + '\ncombo: ' + combo +
+      '\nkeyCode: ' + e.keyCode + '\nrepeat: ' + e.repeat;
+
+    if (e.key === 'ArrowUp') my = Math.max(0, my - 10);
+    if (e.key === 'ArrowDown') my = Math.min(180, my + 10);
+    if (e.key === 'ArrowLeft') mx = Math.max(0, mx - 10);
+    if (e.key === 'ArrowRight') mx = Math.min(280, mx + 10);
+
+    var marker = document.getElementById('marker');
+    marker.style.left = mx + 'px';
+    marker.style.top = my + 'px';
+    document.getElementById('position-output').textContent = 'Position: (' + mx + ', ' + my + ')';
+
+    logLines.unshift(new Date().toLocaleTimeString() + ' — ' + combo);
+    if (logLines.length > 20) logLines.pop();
+    document.getElementById('key-log').textContent = logLines.join('\n');
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Network Test{% endblock %}
+{% block content %}
+<h1>Network / AJAX Test</h1>
+<p>Trigger various network requests to test <code>list_network_requests</code> and <code>get_network_request</code>.</p>
+
+<div class="section">
+  <h2>GET Request</h2>
+  <button id="btn-get" onclick="
+    fetch('/api/data')
+      .then(function(r) { return r.json(); })
+      .then(function(d) { document.getElementById('get-output').textContent = JSON.stringify(d, null, 2); })
+      .catch(function(e) { document.getElementById('get-output').textContent = 'Error: ' + e; });
+  ">Fetch /api/data (GET)</button>
+  <div id="get-output" class="output">No request yet</div>
+</div>
+
+<div class="section">
+  <h2>POST Request (JSON)</h2>
+  <button id="btn-post" onclick="
+    fetch('/api/echo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Hello MCP', count: 42 })
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(d) { document.getElementById('post-output').textContent = JSON.stringify(d, null, 2); })
+      .catch(function(e) { document.getElementById('post-output').textContent = 'Error: ' + e; });
+  ">POST /api/echo</button>
+  <div id="post-output" class="output">No request yet</div>
+</div>
+
+<div class="section">
+  <h2>POST Form Data</h2>
+  <button id="btn-form" onclick="
+    var fd = new FormData();
+    fd.append('username', 'testuser');
+    fd.append('action', 'login');
+    fetch('/api/form', { method: 'POST', body: fd })
+      .then(function(r) { return r.json(); })
+      .then(function(d) { document.getElementById('form-output').textContent = JSON.stringify(d, null, 2); })
+      .catch(function(e) { document.getElementById('form-output').textContent = 'Error: ' + e; });
+  ">POST /api/form</button>
+  <div id="form-output" class="output">No request yet</div>
+</div>
+
+<div class="section">
+  <h2>Slow Request</h2>
+  <button id="btn-slow" onclick="
+    document.getElementById('slow-output').textContent = 'Loading...';
+    fetch('/api/slow?seconds=2')
+      .then(function(r) { return r.json(); })
+      .then(function(d) { document.getElementById('slow-output').textContent = JSON.stringify(d, null, 2); })
+      .catch(function(e) { document.getElementById('slow-output').textContent = 'Error: ' + e; });
+  ">GET /api/slow (2s delay)</button>
+  <div id="slow-output" class="output">No request yet</div>
+</div>
+
+<div class="section">
+  <h2>XMLHttpRequest</h2>
+  <button id="btn-xhr" onclick="
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/data');
+    xhr.onload = function() { document.getElementById('xhr-output').textContent = xhr.responseText; };
+    xhr.onerror = function() { document.getElementById('xhr-output').textContent = 'XHR error'; };
+    xhr.send();
+  ">XHR GET /api/data</button>
+  <div id="xhr-output" class="output">No request yet</div>
+</div>
+
+<div class="section">
+  <h2>Multiple Requests</h2>
+  <button id="btn-multi" onclick="
+    var out = document.getElementById('multi-output');
+    out.textContent = 'Sending 3 requests...';
+    Promise.all([
+      fetch('/api/data').then(function(r) { return r.json(); }),
+      fetch('/api/echo', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({n:1}) }).then(function(r) { return r.json(); }),
+      fetch('/api/echo', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({n:2}) }).then(function(r) { return r.json(); })
+    ]).then(function(results) {
+      out.textContent = results.map(function(r) { return JSON.stringify(r); }).join('\n\n');
+    }).catch(function(e) { out.textContent = 'Error: ' + e; });
+  ">Fire 3 requests</button>
+  <div id="multi-output" class="output">No requests yet</div>
+</div>
+{% endblock %}

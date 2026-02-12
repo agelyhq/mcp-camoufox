@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Scroll Test{% endblock %}
+{% block extra_css %}
+  .scroll-section { padding: 40px 20px; margin: 10px 0; border-radius: 6px; }
+  #scroll-indicator { position: fixed; top: 10px; right: 10px; background: rgba(0,0,0,0.7); color: #fff; padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; z-index: 100; }
+{% endblock %}
+
+{% block content %}
+<div id="scroll-indicator">Scroll: 0%</div>
+<h1>Scroll Test</h1>
+<p>This page is intentionally long to test scrolling. Each section has a unique ID for <code>scroll(uid=...)</code>.</p>
+
+<div class="scroll-section" id="section-1" style="background:#e3f2fd;">
+  <h2>Section 1 — Top</h2>
+  <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.</p>
+</div>
+
+<div class="scroll-section" id="section-2" style="background:#f3e5f5;">
+  <h2>Section 2</h2>
+  <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.</p>
+  <ul>
+    <li>Item Alpha</li>
+    <li>Item Beta</li>
+    <li>Item Gamma</li>
+    <li>Item Delta</li>
+  </ul>
+</div>
+
+<div class="scroll-section" id="section-3" style="background:#e8f5e9;">
+  <h2>Section 3</h2>
+  <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam.</p>
+  <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; margin-top:10px;">
+    <tr><th>Name</th><th>Value</th></tr>
+    <tr><td>Alpha</td><td>100</td></tr>
+    <tr><td>Beta</td><td>200</td></tr>
+    <tr><td>Gamma</td><td>300</td></tr>
+  </table>
+</div>
+
+<div class="scroll-section" id="section-4" style="background:#fff3e0;">
+  <h2>Section 4</h2>
+  <p>Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.</p>
+  <p>Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit.</p>
+</div>
+
+<div class="scroll-section" id="section-5" style="background:#fce4ec;">
+  <h2>Section 5</h2>
+  <p>At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores.</p>
+</div>
+
+<div class="scroll-section" id="section-6" style="background:#e0f7fa;">
+  <h2>Section 6</h2>
+  <p>Et harum quidem rerum facilis est et expedita distinctio. Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit.</p>
+</div>
+
+<div class="scroll-section" id="section-7" style="background:#f1f8e9;">
+  <h2>Section 7</h2>
+  <p>Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae.</p>
+</div>
+
+<div class="scroll-section" id="section-8" style="background:#ede7f6;">
+  <h2>Section 8</h2>
+  <p>Itaque earum rerum hic tenetur a sapiente delectus, ut aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus asperiores repellat.</p>
+</div>
+
+<div class="scroll-section" id="section-9" style="background:#fff8e1;">
+  <h2>Section 9</h2>
+  <p>Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur.</p>
+</div>
+
+<div class="scroll-section" id="section-10" style="background:#efebe9;">
+  <h2>Section 10 — Bottom</h2>
+  <p>You have reached the bottom of the page. Scroll back up to test upward scrolling.</p>
+  <p id="bottom-marker" style="font-weight:bold; color:#c62828;">🏁 End of page</p>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.addEventListener('scroll', function() {
+    var scrollTop = window.scrollY;
+    var docHeight = document.documentElement.scrollHeight - window.innerHeight;
+    var pct = docHeight > 0 ? Math.round((scrollTop / docHeight) * 100) : 0;
+    document.getElementById('scroll-indicator').textContent = 'Scroll: ' + pct + '%';
+  });
+</script>
+{% endblock %}

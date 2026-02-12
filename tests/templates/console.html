@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Console Test</title></head>
+<body>
+  <h1>Console Test Page</h1>
+  <button id="btn-log" onclick="console.log('hello from log')">Log message</button>
+  <button id="btn-warn" onclick="console.warn('this is a warning')">Warn message</button>
+  <button id="btn-error" onclick="console.error('something went wrong')">Error message</button>
+  <button id="btn-multi" onclick="logMultiple()">Log multiple</button>
+
+  <script>
+    function logMultiple() {
+      for (let i = 0; i < 5; i++) {
+        console.log('multi-' + i);
+      }
+    }
+  </script>
+</body>
+</html>

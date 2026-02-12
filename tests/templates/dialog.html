@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Dialog Test{% endblock %}
+{% block content %}
+<h1>Dialog Test</h1>
+<p>Trigger browser dialogs (alert, confirm, prompt) and test <code>handle_dialog</code>.</p>
+
+<div class="section">
+  <h2>Alert</h2>
+  <button id="btn-alert" onclick="alert('Hello from alert!')">Show Alert</button>
+</div>
+
+<div class="section">
+  <h2>Confirm</h2>
+  <button id="btn-confirm" onclick="
+    var result = confirm('Do you accept?');
+    document.getElementById('confirm-output').textContent = 'Confirm result: ' + result;
+  ">Show Confirm</button>
+  <div id="confirm-output" class="output">No confirm yet</div>
+</div>
+
+<div class="section">
+  <h2>Prompt</h2>
+  <button id="btn-prompt" onclick="
+    var result = prompt('Enter your name:', 'Guest');
+    document.getElementById('prompt-output').textContent = 'Prompt result: ' + JSON.stringify(result);
+  ">Show Prompt</button>
+  <div id="prompt-output" class="output">No prompt yet</div>
+</div>
+
+<div class="section">
+  <h2>Chained Dialogs</h2>
+  <button id="btn-chain" onclick="
+    alert('Step 1: Alert');
+    var ok = confirm('Step 2: Continue?');
+    if (ok) {
+      var name = prompt('Step 3: Your name?');
+      document.getElementById('chain-output').textContent = 'Chain completed — name: ' + JSON.stringify(name);
+    } else {
+      document.getElementById('chain-output').textContent = 'Chain cancelled at confirm';
+    }
+  ">Start Chain</button>
+  <div id="chain-output" class="output">No chain started</div>
+</div>
+
+<div class="section">
+  <h2>beforeunload Dialog</h2>
+  <button id="btn-beforeunload" onclick="
+    window.addEventListener('beforeunload', function(e) { e.preventDefault(); });
+    document.getElementById('beforeunload-output').textContent = 'beforeunload listener attached. Navigate away to trigger.';
+  ">Attach beforeunload</button>
+  <div id="beforeunload-output" class="output">Not attached</div>
+</div>
+{% endblock %}

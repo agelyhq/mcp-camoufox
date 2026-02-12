@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Infinite Scroll Test{% endblock %}
+{% block extra_css %}
+  .item { padding: 16px; margin: 8px 0; border: 1px solid #ddd; border-radius: 6px; background: #fafafa; }
+  .item h3 { margin-bottom: 4px; }
+  .item .meta { color: #888; font-size: 0.85rem; }
+  #loading { text-align: center; padding: 20px; color: #666; display: none; }
+  #status { position: fixed; top: 10px; right: 10px; background: rgba(0,0,0,0.7); color: #fff; padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; z-index: 100; }
+{% endblock %}
+
+{% block content %}
+<div id="status">Items: 0 | Page: 0</div>
+<h1>Infinite Scroll Test</h1>
+<p>Scroll down to load more items via AJAX. Tests <code>scroll</code>, <code>wait_for</code>, <code>list_network_requests</code>.</p>
+
+<div id="item-list"></div>
+<div id="loading">Loading more items...</div>
+<div id="end-message" style="display:none; text-align:center; padding:20px; color:#999; font-style:italic;">
+  No more items to load.
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  var currentPage = 0;
+  var isLoading = false;
+  var hasMore = true;
+
+  function updateStatus() {
+    var count = document.querySelectorAll('.item').length;
+    document.getElementById('status').textContent = 'Items: ' + count + ' | Page: ' + currentPage;
+  }
+
+  function loadMore() {
+    if (isLoading || !hasMore) return;
+    isLoading = true;
+    document.getElementById('loading').style.display = 'block';
+
+    fetch('/api/items?page=' + currentPage + '&per_page=10')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var list = document.getElementById('item-list');
+        data.items.forEach(function(item) {
+          var div = document.createElement('div');
+          div.className = 'item';
+          div.id = 'item-' + item.id;
+          div.innerHTML = '<h3>' + item.title + '</h3>'
+            + '<p>' + item.body + '</p>'
+            + '<div class="meta">ID: ' + item.id + ' | Category: ' + item.category + '</div>';
+          list.appendChild(div);
+        });
+        currentPage++;
+        hasMore = data.has_more;
+        if (!hasMore) {
+          document.getElementById('end-message').style.display = 'block';
+        }
+        updateStatus();
+      })
+      .catch(function(err) {
+        console.error('Load error:', err);
+      })
+      .finally(function() {
+        isLoading = false;
+        document.getElementById('loading').style.display = 'none';
+        checkFillPage();
+      });
+  }
+
+  function checkFillPage() {
+    if (hasMore && document.documentElement.scrollHeight <= window.innerHeight + 200) {
+      loadMore();
+    }
+  }
+
+  window.addEventListener('scroll', function() {
+    var scrollBottom = window.innerHeight + window.scrollY;
+    var docHeight = document.documentElement.scrollHeight;
+    if (scrollBottom >= docHeight - 200) {
+      loadMore();
+    }
+  });
+
+  loadMore();
+</script>
+{% endblock %}
