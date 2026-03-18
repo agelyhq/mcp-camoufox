@@ -8,7 +8,7 @@ from tests.helpers import extract_uid, tool_text
 
 
 async def test_list_console_messages_log(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/console"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/console", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "Log message")
 
@@ -20,7 +20,7 @@ async def test_list_console_messages_log(client: Client, flask_server: str) -> N
 
 
 async def test_list_console_messages_error(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/console"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/console", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "Error message")
 
@@ -32,7 +32,7 @@ async def test_list_console_messages_error(client: Client, flask_server: str) ->
 
 
 async def test_list_console_messages_filter_excludes(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/console"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/console", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
 
     log_uid = extract_uid(snap, "Log message")
@@ -48,7 +48,7 @@ async def test_list_console_messages_filter_excludes(client: Client, flask_serve
 
 
 async def test_list_console_messages_limit(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/console"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/console", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "Log multiple")
 
@@ -62,7 +62,7 @@ async def test_list_console_messages_limit(client: Client, flask_server: str) ->
 
 
 async def test_list_console_messages_empty(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/console"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/console", "profile": "test"})
 
     result = tool_text(await client.call_tool("list_console_messages", {}))
     assert "No console messages" in result

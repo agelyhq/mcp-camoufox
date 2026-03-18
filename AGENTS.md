@@ -2,7 +2,7 @@
 
 MCP server exposing Camoufox anti-detect browser control to AI agents. Built with [FastMCP](https://gofastmcp.com/). Uses Playwright (via `camoufox` package) for browser lifecycle; custom JS injection for DOM snapshots and UID-based element targeting.
 
-Package: `camoufox_mcp` — dependency: `fastmcp>=2.14`
+Package: `camoufox_mcp` — dependencies: `fastmcp>=2.14`, `camoufox[geoip]>=0.4`, `boto3>=1.34`
 
 ## Build & Lint
 
@@ -11,12 +11,6 @@ uv sync --extra dev                    # Install with dev deps
 uv run ruff check src/ tests/          # Lint
 uv run ruff format src/ tests/          # Format
 CAMOUFOX_HEADLESS=true uv run pytest   # Run E2E tests
-```
-
-### Quick checks
-```bash
-uv run ruff check src/camoufox_mcp/tools/   # Lint one package
-uv run python -c "from camoufox_mcp.server import mcp"  # Verify imports
 ```
 
 Prerequisites: Python 3.11+, [uv](https://docs.astral.sh/uv/). Camoufox binary is auto-fetched on first `main()` call.
@@ -62,32 +56,29 @@ Multi-tab via `BrowserManager.pages` dict (int → PageInfo). Active tab tracked
 
 ## Session Lifecycle
 
-- **`navigate`** — Auto-starts a session if none is running. Accepts optional `SessionParams` (OS, viewport, profile name, block_images, block_webrtc) used only on first start. GeoIP and humanize are always enabled. Proxy comes from `ServerConfig` (env var).
-- **`kill_session`** — Kills browser, clears pages, resets state. Next `navigate` starts fresh. Safe to call when no session is running.
-- If `profile` is set, uses `persistent_context=True` + `user_data_dir` resolved under `CAMOUFOX_PROFILES_DIR`.
+- **Startup** — `_check_s3()` runs in `lifespan` before yielding: verifies S3 is configured and the bucket is reachable via `head_bucket`. Raises `RuntimeError` immediately if not, preventing the server from starting with broken config.
+- **`navigate`** — `profile` is **required**. Auto-starts a session if none is running. `SessionParams` (OS, viewport, block flags) used only on first start. GeoIP and humanize always enabled. Proxy from `ServerConfig`.
+- **`kill_session`** — Closes browser, zips + uploads profile to S3, deletes temp dir, resets state. Safe when no session is running.
+- Profile is pulled from S3 into a `TemporaryDirectory` at session start; pushed back on stop. S3 **must** be configured — missing any `CAMOUFOX_S3_*` var causes startup to fail.
+- **Headless** is env-only (`CAMOUFOX_HEADLESS`). Not a session param.
 
 ## Project Structure
 
 - `server.py` — Composition root: FastMCP instance, async lifespan (creates BrowserManager, no browser start), `_ensure_browser_binary()` auto-fetch, entry point
 - `browser/addons.py` — Addon lifecycle: download `.xpi` (cached in `~/.cache/camoufox-mcp/addons/`), extract to temp dir per session, cleanup on stop
-- `browser/config.py` — `ServerConfig` (env-only: headless, proxy, binary, profiles_dir, addon_urls) + `SessionParams` (per-session: OS, viewport, profile, block flags)
-- `browser/manager.py` — `BrowserManager` (lazy Playwright lifecycle, `start_session`/`stop_session` with single-instance guard) + `PageInfo`
-- `browser/console.py` — `ConsoleMonitor` + `ConsoleEntry`: captures `page.on("console")` events, bounded deque storage, level filtering, limit-based retrieval
-- `browser/network.py` — `NetworkMonitor` + `NetworkEntry`: captures request/response events via Playwright listeners, bounded deque storage, lazy body fetching
-- `browser/page_handle.py` — `PageHandle` wraps Playwright `Page` (navigate, evaluate, screenshot, mouse/keyboard, viewport, close, network/console monitors, dialog tracking, file upload)
+- `browser/config.py` — `S3Config` (OVH S3 credentials) + `ServerConfig` (env-only: headless, proxy, binary, addon_urls, s3) + `SessionParams` (per-session: **profile** required, OS, viewport, block flags)
+- `browser/manager.py` — `BrowserManager` (lazy Playwright lifecycle, `start_session`/`stop_session` with single-instance guard, profile pull/push orchestration) + `PageInfo`
+- `browser/profile_store.py` — S3 profile sync: `pull_profile()` downloads+extracts zip into tmpdir; `push_profile()` zips+uploads from tmpdir
+- `browser/console.py` — `ConsoleMonitor` + `ConsoleEntry`: bounded deque, level filtering
+- `browser/network.py` — `NetworkMonitor` + `NetworkEntry`: request/response capture, lazy body fetching
+- `browser/page_handle.py` — `PageHandle` wraps Playwright `Page` (navigate, evaluate, screenshot, input, monitors, dialogs)
 - `dom/snapshot.py` — JS file loading with dict-based cache
-- `dom/uid.py` — `valid_uid()` regex, `uid_selector()` CSS builder, `run_js_action()` shared helper, `resolve_uid()`
-- `dom/actions.py` — DOM actions via `run_js_action()`: `clear_field()`, `scroll_into_view()`, `file_input_selector()`
-- `js/` — JS files (snapshot, resolve_uid, clear_field, scroll_into_view, file_input_selector) — packaged inside `camoufox_mcp/`
+- `dom/uid.py` — `valid_uid()`, `uid_selector()`, `run_js_action()`, `resolve_uid()`
+- `dom/actions.py` — `clear_field()`, `scroll_into_view()`, `file_input_selector()`
+- `js/` — JS files packaged inside `camoufox_mcp/`
 - `tools/_context.py` — `get_manager(ctx)` and `get_page(ctx)` helpers (shared by all tools)
-- `tools/navigate.py` — Navigate + lazy session start with optional session params
-- `tools/kill_session.py` — Kill browser and reset state
-- `tools/list_console_messages.py` — List captured browser console messages with level filtering and limit
-- `tools/list_network_requests.py` — List captured network requests with filtering and pagination
-- `tools/get_network_request.py` — Get full details (headers, body) of a single request by reqid
-- `tools/handle_dialog.py` — Accept or dismiss browser dialogs (alert, confirm, prompt)
-- `tools/upload_file.py` — Upload a local file through a file input element via UID
-- `tools/list_profiles.py` — List available browser profiles from `CAMOUFOX_PROFILES_DIR`
+- `tools/navigate.py` — Navigate + lazy session start; `profile` is mandatory
+- `tools/kill_session.py` — Kill browser, trigger profile push to S3, reset state
 - `tools/<name>.py` — One file per browser tool, each exports `register(mcp)` function
 
 ## Conventions
@@ -118,32 +109,34 @@ Every tool file follows the same structure:
 - `BrowserManager.start_session()` raises `RuntimeError` if a session is already running
 - `BrowserManager.active_page` raises `RuntimeError` if no active page / no session
 - Playwright lifecycle managed in `BrowserManager.start_session()/stop_session()` — browser + playwright stopped on shutdown
-- `tools/__init__.py` registers all 21 tools via module list — adding a tool means creating a file and adding it to `_TOOL_MODULES`
+- `tools/__init__.py` registers all 20 tools via module list — adding a tool means creating a file and adding it to `_TOOL_MODULES`
 - `VALID_OS` in `config.py` validates target OS against `{windows, linux, macos}`
-- Profile names are resolved to `CAMOUFOX_PROFILES_DIR/<name>` — no absolute paths from tool callers
+- `profile` is required on every `navigate` call — no ephemeral sessions
+- S3 is **required**: all four `CAMOUFOX_S3_*` vars must be set; missing any raises `RuntimeError` on first `navigate`
+- Profile uses a `TemporaryDirectory` per session as `user_data_dir`; pulled from S3 on start, pushed on stop, temp dir deleted after push
+- `profile_store.pull_profile()` creates an empty local dir when S3 returns 404/NoSuchKey
+- `profile_store.push_profile()` never deletes the profile dir — temp dir cleanup is `BrowserManager.stop_session()`'s responsibility
+- S3 profile key format: `profiles/<name>.zip`
 - Addons are downloaded once (`.xpi` cached in `~/.cache/camoufox-mcp/addons/`), extracted fresh to a temp dir per session, cleaned up on `stop_session()`
 - `CAMOUFOX_ADDON_URLS` env var overrides default addon list; empty string disables all addons
-- `ConsoleMonitor` attaches to each `PageHandle` on construction; bounded deque (max 1000 entries); entries reset on frame navigation with preservation
-- `NetworkMonitor` attaches to each `PageHandle` on construction; bounded deque (max 1000 entries); response bodies fetched on-demand via Playwright `Response` reference
-- `NetworkMonitor._pending` uses `id(request)` as key — avoids collision when multiple concurrent requests share URL+method
-- Network entries reset on frame navigation; previous entries preserved (bounded by `MAX_ENTRIES`)
-- `PageHandle` captures the latest browser dialog via `page.on("dialog")` — only one pending dialog stored (last wins); cleared after `respond_to_dialog()`
-- `uid_selector()` in `dom/uid.py` is the single source for `data-mcp-uid` CSS selectors — `PageHandle` never builds UID selectors
+- `ConsoleMonitor` + `NetworkMonitor` attach per `PageHandle`; bounded deque (max 1000 entries); reset on navigation, bodies fetched on-demand
+- `PageHandle` captures the latest dialog via `page.on("dialog")` — one pending dialog stored (last wins); cleared after `respond_to_dialog()`
+- `uid_selector()` in `dom/uid.py` is the single source for `data-mcp-uid` CSS selectors
 
 ## E2E Test Suite
 
-58 tests using `pytest-asyncio` + in-memory `fastmcp.Client`. Flask test server auto-starts per session.
+60 tests using `pytest-asyncio` + in-memory `fastmcp.Client`. Flask test server + moto S3 server auto-start per session.
 
-- `tests/conftest.py` — `_profiles_dir` (session-scoped, autouse, sets `CAMOUFOX_PROFILES_DIR` before lifespan) + `flask_server` (session-scoped, background thread) + `client` (per-test, kills session on teardown)
+- `tests/conftest.py` — `_s3_mock` (session-scoped, autouse: starts `ThreadedMotoServer` on port 5124, sets S3 env vars, creates bucket) + `flask_server` + `client` (per-test, kills session on teardown)
 - `tests/helpers.py` — `extract_uid()`, `extract_first_reqid()`, `tool_text()`
 - `tests/test_<tool>.py` — One file per tool group (click, fill, evaluate, press_key, scroll, upload, wait_for, dialog, screenshot, snapshot, network, console, infinite_scroll, tools_registered)
-- `tests/test_profile.py` — Profile persistence (same profile preserves cookies, different profile = independent store) + `list_profiles` tool validation. Manages `Client(mcp)` manually with temp `CAMOUFOX_PROFILES_DIR`
-- `tests/test_os_fingerprint.py` — OS fingerprint via local `fingerprint.html` page (CreepJS/FingerprintJS techniques): parametrized over windows/linux/macos, checks detected OS + userAgent; verifies all three produce distinct UAs
+- `tests/test_profile.py` — Profile persistence across sessions via moto S3. Manages `Client(mcp)` manually
+- `tests/test_profile_s3.py` — S3 unit tests against moto server: pull not-found, pull found (extracts zip), push (zips+uploads), roundtrip, noop on missing dir
+- `tests/test_os_fingerprint.py` — OS fingerprint: parametrized over windows/linux/macos
 - `tests/server.py` — Flask routes + API endpoints
-- `tests/templates/fingerprint.html` — Standalone OS fingerprint checker (multi-vector: UA, platform, fonts, WebGL, worker, prototype lies)
 - `tests/templates/<name>.html` — One template per tool group
 
-`click` and `fill` tools auto-scroll elements into view before interaction (scroll_into_view + re-resolve coordinates).
+All tests pass `"profile": "<name>"` to every `navigate` call. `click` and `fill` auto-scroll elements into view before interaction.
 
 ## Adding a New Tool
 

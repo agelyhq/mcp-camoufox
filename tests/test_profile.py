@@ -45,22 +45,21 @@ async def test_different_profile_different_cookie(flask_server: str) -> None:
     assert sid_a != sid_b, f"Different profiles share the same cookie: {sid_a!r}"
 
 
-async def test_list_profiles(flask_server: str) -> None:
-    """list_profiles returns created profile names after sessions."""
+async def test_multiple_profiles_independent(flask_server: str) -> None:
+    """Different named profiles must each persist their own cookies independently."""
     url = f"{flask_server}/profile"
 
     async with Client(mcp) as c:
-        await _get_session_id(c, url, "list_a")
-        profiles_after = tool_text(await c.call_tool("list_profiles", {}))
-        assert "list_a" in profiles_after, f"Expected 'list_a' in {profiles_after!r}"
+        sid_a1 = await _get_session_id(c, url, "multi_a")
         await c.call_tool("kill_session", {})
 
     async with Client(mcp) as c:
-        await _get_session_id(c, url, "list_b")
+        sid_b = await _get_session_id(c, url, "multi_b")
         await c.call_tool("kill_session", {})
 
     async with Client(mcp) as c:
-        profiles = tool_text(await c.call_tool("list_profiles", {}))
-        names = profiles.strip().splitlines()
-        assert "list_a" in names, f"Expected 'list_a' in {names}"
-        assert "list_b" in names, f"Expected 'list_b' in {names}"
+        sid_a2 = await _get_session_id(c, url, "multi_a")
+        await c.call_tool("kill_session", {})
+
+    assert sid_a1 == sid_a2, f"Profile multi_a cookie changed: {sid_a1!r} != {sid_a2!r}"
+    assert sid_a1 != sid_b, f"Profiles multi_a and multi_b share the same cookie: {sid_a1!r}"

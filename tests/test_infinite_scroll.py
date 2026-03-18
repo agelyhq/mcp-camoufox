@@ -8,7 +8,9 @@ from tests.helpers import tool_text
 
 
 async def test_infinite_scroll_initial_load(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/infinite-scroll"})
+    await client.call_tool(
+        "navigate", {"url": f"{flask_server}/infinite-scroll", "profile": "test"}
+    )
     await asyncio.sleep(1)
 
     js = tool_text(
@@ -22,7 +24,9 @@ async def test_infinite_scroll_initial_load(client: Client, flask_server: str) -
 
 
 async def test_infinite_scroll_loads_more_on_scroll(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/infinite-scroll"})
+    await client.call_tool(
+        "navigate", {"url": f"{flask_server}/infinite-scroll", "profile": "test"}
+    )
     await asyncio.sleep(1)
 
     before = tool_text(
@@ -50,7 +54,9 @@ async def test_infinite_scroll_loads_more_on_scroll(client: Client, flask_server
 
 
 async def test_infinite_scroll_network_requests(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/infinite-scroll"})
+    await client.call_tool(
+        "navigate", {"url": f"{flask_server}/infinite-scroll", "profile": "test"}
+    )
     await asyncio.sleep(1)
 
     result = tool_text(

@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import os
-import shutil
-import tempfile
 import threading
 import time
 import urllib.request
 from typing import TYPE_CHECKING
 
+import boto3
 import pytest
 from fastmcp import Client
+from moto.server import ThreadedMotoServer
 
 from camoufox_mcp.server import mcp
 
@@ -17,16 +17,38 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
 
 FLASK_URL = "http://127.0.0.1:5123"
+_S3_BUCKET = "camoufox-test-profiles"
+_MOTO_PORT = 5124
+_MOTO_ENDPOINT = f"http://127.0.0.1:{_MOTO_PORT}"
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _profiles_dir() -> Iterator[str]:
-    """Session-scoped temp profiles dir, set before any Client triggers the lifespan."""
-    profiles_dir = tempfile.mkdtemp(prefix="camoufox_test_profiles_")
-    os.environ["CAMOUFOX_PROFILES_DIR"] = profiles_dir
-    yield profiles_dir
-    os.environ.pop("CAMOUFOX_PROFILES_DIR", None)
-    shutil.rmtree(profiles_dir, ignore_errors=True)
+def _s3_mock() -> Iterator[None]:
+    """Start a real moto HTTP server so boto3 calls from threads work correctly."""
+    server = ThreadedMotoServer(port=_MOTO_PORT)
+    server.start()
+
+    env_vars = {
+        "CAMOUFOX_S3_ENDPOINT": _MOTO_ENDPOINT,
+        "CAMOUFOX_S3_ACCESS_KEY": "test",
+        "CAMOUFOX_S3_SECRET_KEY": "test",
+        "CAMOUFOX_S3_BUCKET": _S3_BUCKET,
+        "AWS_DEFAULT_REGION": "us-east-1",
+        "AWS_ACCESS_KEY_ID": "test",
+        "AWS_SECRET_ACCESS_KEY": "test",
+    }
+    for k, v in env_vars.items():
+        os.environ[k] = v
+
+    boto3.client("s3", region_name="us-east-1", endpoint_url=_MOTO_ENDPOINT).create_bucket(
+        Bucket=_S3_BUCKET
+    )
+
+    yield
+
+    server.stop()
+    for k in env_vars:
+        os.environ.pop(k, None)
 
 
 @pytest.fixture(scope="session")

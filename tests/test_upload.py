@@ -10,7 +10,7 @@ from tests.helpers import extract_uid, tool_text
 
 
 async def test_upload_file(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/upload"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/upload", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "input:file")
 
@@ -26,7 +26,7 @@ async def test_upload_file(client: Client, flask_server: str) -> None:
             )
         )
         assert "uploaded" in result.lower()
-        await asyncio.sleep(2)
+        await asyncio.sleep(5)
 
         js = tool_text(
             await client.call_tool(
@@ -40,7 +40,7 @@ async def test_upload_file(client: Client, flask_server: str) -> None:
 
 
 async def test_upload_missing_file(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/upload"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/upload", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "input:file")
 

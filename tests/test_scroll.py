@@ -8,7 +8,7 @@ from tests.helpers import tool_text
 
 
 async def test_scroll_down(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/scroll"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/scroll", "profile": "test"})
 
     result = tool_text(await client.call_tool("scroll", {"direction": "down", "amount": 10}))
     assert "scrolled" in result.lower()
@@ -19,7 +19,7 @@ async def test_scroll_down(client: Client, flask_server: str) -> None:
 
 
 async def test_scroll_element_into_view(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/scroll"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/scroll", "profile": "test"})
 
     js_before = tool_text(
         await client.call_tool("evaluate", {"script": "Math.round(window.scrollY)"})

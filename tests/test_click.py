@@ -6,7 +6,7 @@ from tests.helpers import extract_uid, tool_text
 
 
 async def test_single_click(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/click"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "Click me")
 
@@ -23,7 +23,7 @@ async def test_single_click(client: Client, flask_server: str) -> None:
 
 
 async def test_double_click(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/click"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "Double-click me")
 
@@ -40,7 +40,7 @@ async def test_double_click(client: Client, flask_server: str) -> None:
 
 
 async def test_click_counter(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/click"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "Count clicks")
 
@@ -57,12 +57,12 @@ async def test_click_counter(client: Client, flask_server: str) -> None:
 
 
 async def test_click_invalid_uid(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/click"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": "test"})
     result = tool_text(await client.call_tool("click", {"uid": "e99999"}))
     assert "error" in result.lower()
 
 
 async def test_click_bad_uid_format(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/click"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": "test"})
     result = tool_text(await client.call_tool("click", {"uid": "invalid"}))
     assert "error" in result.lower()

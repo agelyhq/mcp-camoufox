@@ -6,7 +6,7 @@ from tests.helpers import tool_text
 
 
 async def test_take_snapshot(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/snapshot"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/snapshot", "profile": "test"})
 
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     assert "e0" in snap or "e1" in snap
@@ -14,7 +14,7 @@ async def test_take_snapshot(client: Client, flask_server: str) -> None:
 
 
 async def test_snapshot_contains_uids(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/click"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": "test"})
 
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     assert "Click me" in snap

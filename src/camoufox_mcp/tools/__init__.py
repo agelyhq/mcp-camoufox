@@ -17,7 +17,6 @@ from camoufox_mcp.tools import (
     kill_session,
     list_console_messages,
     list_network_requests,
-    list_profiles,
     navigate,
     new_page,
     press_key,
@@ -50,7 +49,6 @@ _TOOL_MODULES = [
     close_page,
     handle_dialog,
     upload_file,
-    list_profiles,
 ]
 
 

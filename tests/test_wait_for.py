@@ -6,7 +6,7 @@ from tests.helpers import tool_text
 
 
 async def test_wait_for_selector(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/wait-for"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/wait-for", "profile": "test"})
 
     result = tool_text(
         await client.call_tool(
@@ -18,7 +18,7 @@ async def test_wait_for_selector(client: Client, flask_server: str) -> None:
 
 
 async def test_wait_for_timeout(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/wait-for"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/wait-for", "profile": "test"})
 
     result = tool_text(
         await client.call_tool(
@@ -30,21 +30,21 @@ async def test_wait_for_timeout(client: Client, flask_server: str) -> None:
 
 
 async def test_wait_for_load(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/wait-for"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/wait-for", "profile": "test"})
 
     result = tool_text(await client.call_tool("wait_for", {"condition": "load"}))
     assert "loaded" in result.lower() or "load" in result.lower()
 
 
 async def test_wait_for_idle(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/wait-for"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/wait-for", "profile": "test"})
 
     result = tool_text(await client.call_tool("wait_for", {"condition": "idle", "timeout": 10000}))
     assert "idle" in result.lower()
 
 
 async def test_wait_for_invalid_condition(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/wait-for"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/wait-for", "profile": "test"})
 
     result = tool_text(await client.call_tool("wait_for", {"condition": "bogus"}))
     assert "error" in result.lower()

@@ -10,12 +10,12 @@ def register(mcp: FastMCP) -> None:
     @mcp.tool()
     async def navigate(
         url: str,
+        profile: str,
         ctx: Context,
         timeout: int = 30000,
         target_os: str = "windows",
         viewport_width: int = 1280,
         viewport_height: int = 800,
-        profile: str | None = None,
         block_images: bool = False,
         block_webrtc: bool = False,
     ) -> str:
@@ -26,12 +26,12 @@ def register(mcp: FastMCP) -> None:
 
         Args:
             url: Absolute URL to navigate to
+            profile: Profile name for persistent context (cookies/storage survive restarts).
+                     Resolved under CAMOUFOX_PROFILES_DIR. Downloaded from S3 if configured.
             timeout: Max wait time in ms (default 30000)
             target_os: Fingerprint target OS — windows, linux, or macos (default: windows)
             viewport_width: Browser viewport width in pixels (default: 1280)
             viewport_height: Browser viewport height in pixels (default: 800)
-            profile: Profile name for persistent context (cookies/storage survive restarts).
-                     Resolved under CAMOUFOX_PROFILES_DIR. Omit for ephemeral session.
             block_images: Block image loading for faster browsing (default: false)
             block_webrtc: Block WebRTC to prevent IP leaks (default: false)
         """
@@ -42,10 +42,10 @@ def register(mcp: FastMCP) -> None:
                 if target_os not in VALID_OS:
                     return f"Error: Invalid target_os={target_os!r}. Must be one of: {', '.join(sorted(VALID_OS))}"
                 params = SessionParams(
+                    profile=profile,
                     target_os=target_os,
                     viewport_width=viewport_width,
                     viewport_height=viewport_height,
-                    profile=profile,
                     block_images=block_images,
                     block_webrtc=block_webrtc,
                 )

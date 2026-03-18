@@ -42,7 +42,11 @@ Add to your MCP config (e.g. `~/.codeium/windsurf/mcp_config.json`):
       "args": ["--from", "git+ssh://git@github.com/agelyhq/mcp-camoufox.git", "camoufox-mcp"],
       "env": {
         "CAMOUFOX_HEADLESS": "true",
-        "CAMOUFOX_PROFILES_DIR": "/absolute/path/to/profiles"
+        "CAMOUFOX_S3_ENDPOINT": "https://s3.gra.io.cloud.ovh.net",
+        "CAMOUFOX_S3_ACCESS_KEY": "<your-access-key>",
+        "CAMOUFOX_S3_SECRET_KEY": "<your-secret-key>",
+        "CAMOUFOX_S3_BUCKET": "<your-bucket>",
+        "CAMOUFOX_S3_REGION": "gra"
       }
     }
   }
@@ -63,7 +67,11 @@ Add to `claude_desktop_config.json`:
       "args": ["--from", "git+ssh://git@github.com/agelyhq/mcp-camoufox.git", "camoufox-mcp"],
       "env": {
         "CAMOUFOX_HEADLESS": "true",
-        "CAMOUFOX_PROFILES_DIR": "/absolute/path/to/profiles"
+        "CAMOUFOX_S3_ENDPOINT": "https://s3.gra.io.cloud.ovh.net",
+        "CAMOUFOX_S3_ACCESS_KEY": "<your-access-key>",
+        "CAMOUFOX_S3_SECRET_KEY": "<your-secret-key>",
+        "CAMOUFOX_S3_BUCKET": "<your-bucket>",
+        "CAMOUFOX_S3_REGION": "gra"
       }
     }
   }
@@ -82,7 +90,7 @@ The server communicates via stdio — connect any MCP client.
 
 The browser starts **lazily** on the first `navigate` call — no explicit start tool needed.
 
-1. **`navigate`** — Pass a URL. If no session is running, one starts automatically. Optional session params (OS, viewport, profile, etc.) are accepted and used only on first start.
+1. **`navigate`** — Pass a URL and a **required** `profile` name. If no session is running, one starts automatically. Session params (OS, viewport, etc.) are accepted and used only on first start.
 2. Use browser tools (`click`, `fill`, `take_snapshot`, …) as needed.
 3. **`kill_session`** — Kill the browser, reset everything. The next `navigate` starts a fresh session.
 
@@ -90,26 +98,32 @@ Only one session can run at a time. GeoIP spoofing and humanized interactions ar
 
 ### Persistent Profiles
 
-Set `CAMOUFOX_PROFILES_DIR` to a directory, then pass a `profile` name to `navigate`. The profile directory is resolved as `$CAMOUFOX_PROFILES_DIR/<name>` and preserves cookies/storage across sessions.
+A `profile` name is **required** on every `navigate` call. S3 must be configured — profile storage requires it.
+
+On session start, the profile zip is downloaded from S3 into a temp directory (created fresh if not found). On `kill_session`, the profile is zipped, uploaded back to S3, and the temp directory is deleted.
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `CAMOUFOX_HEADLESS` | `true` | Headless mode |
+| `CAMOUFOX_HEADLESS` | `true` | Headless mode (`true`/`false`) |
 | `CAMOUFOX_PROXY` | — | Proxy URL (server-level, not per-session) |
 | `CAMOUFOX_BINARY` | _(auto)_ | Custom Camoufox binary path |
-| `CAMOUFOX_PROFILES_DIR` | _(unset)_ | Directory for persistent browser profiles |
 | `CAMOUFOX_ADDON_URLS` | _(defaults)_ | Comma-separated addon `.xpi` URLs. Defaults to [I still don't care about cookies](https://addons.mozilla.org/firefox/addon/istilldontcareaboutcookies/). Set to empty string to disable all addons |
+| `CAMOUFOX_S3_ENDPOINT` | **required** | S3-compatible endpoint URL (e.g. OVH: `https://s3.gra.cloud.ovh.net`) |
+| `CAMOUFOX_S3_ACCESS_KEY` | **required** | S3 access key |
+| `CAMOUFOX_S3_SECRET_KEY` | **required** | S3 secret key |
+| `CAMOUFOX_S3_BUCKET` | **required** | S3 bucket name for profile storage |
+| `CAMOUFOX_S3_REGION` | `us-east-1` | S3 region (OVH example: `gra`) |
 
-See `.env.example` for a template.
+> All four `CAMOUFOX_S3_*` variables must be set. Without them, `navigate` will fail with a clear error.
 
 ## Available Tools
 
 | Tool | Description |
 |---|---|
-| `navigate` | Go to a URL (auto-starts browser; accepts optional session config) |
-| `kill_session` | Kill the browser and reset everything |
+| `navigate` | Go to a URL — **`profile` is required**; auto-starts browser on first call |
+| `kill_session` | Kill the browser, upload profile to S3, reset everything |
 | `take_snapshot` | Text tree of page with element UIDs |
 | `take_screenshot` | PNG screenshot |
 | `click` | Click element by UID |

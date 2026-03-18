@@ -4,7 +4,7 @@ from fastmcp import Client  # noqa: TC002
 
 
 async def test_take_screenshot_viewport(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/screenshot"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/screenshot", "profile": "test"})
 
     result = await client.call_tool("take_screenshot", {})
     content = result.content[0]
@@ -13,7 +13,7 @@ async def test_take_screenshot_viewport(client: Client, flask_server: str) -> No
 
 
 async def test_take_screenshot_full_page(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/screenshot"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/screenshot", "profile": "test"})
 
     result = await client.call_tool("take_screenshot", {"full_page": True})
     content = result.content[0]

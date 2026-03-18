@@ -6,7 +6,7 @@ from tests.helpers import extract_uid, tool_text
 
 
 async def test_fill_text_input(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/fill"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/fill", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "text")
 
@@ -23,7 +23,7 @@ async def test_fill_text_input(client: Client, flask_server: str) -> None:
 
 
 async def test_fill_email(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/fill"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/fill", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "email")
 
@@ -43,7 +43,7 @@ async def test_fill_email(client: Client, flask_server: str) -> None:
 
 
 async def test_fill_textarea(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/fill"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/fill", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "textarea")
 
@@ -59,7 +59,7 @@ async def test_fill_textarea(client: Client, flask_server: str) -> None:
 
 
 async def test_fill_contenteditable(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/fill"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/fill", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "Edit this")
 
@@ -75,7 +75,7 @@ async def test_fill_contenteditable(client: Client, flask_server: str) -> None:
 
 
 async def test_fill_select(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/fill"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/fill", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "[select")
 
@@ -91,7 +91,7 @@ async def test_fill_select(client: Client, flask_server: str) -> None:
 
 
 async def test_fill_non_editable(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/fill"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/fill", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "Index")
 

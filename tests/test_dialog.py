@@ -8,7 +8,7 @@ from tests.helpers import tool_text
 
 
 async def test_handle_alert(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/dialog"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/dialog", "profile": "test"})
 
     await client.call_tool("evaluate", {"script": "setTimeout(() => alert('Test alert'), 0)"})
     await asyncio.sleep(0.3)
@@ -18,7 +18,7 @@ async def test_handle_alert(client: Client, flask_server: str) -> None:
 
 
 async def test_handle_confirm_dismiss(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/dialog"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/dialog", "profile": "test"})
 
     await client.call_tool(
         "evaluate", {"script": "setTimeout(() => { window._confirmResult = confirm('OK?') }, 0)"}
@@ -30,7 +30,7 @@ async def test_handle_confirm_dismiss(client: Client, flask_server: str) -> None
 
 
 async def test_handle_prompt(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/dialog"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/dialog", "profile": "test"})
 
     await client.call_tool(
         "evaluate",
@@ -47,7 +47,7 @@ async def test_handle_prompt(client: Client, flask_server: str) -> None:
 
 
 async def test_handle_dialog_no_pending(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/dialog"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/dialog", "profile": "test"})
 
     result = tool_text(await client.call_tool("handle_dialog", {"action": "accept"}))
     assert "no dialog" in result.lower() or "error" in result.lower()

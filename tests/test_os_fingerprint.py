@@ -43,7 +43,7 @@ OS_EXPECTATIONS: list[tuple[str, str]] = [
 
 async def _run_fingerprint(c: Client, url: str, target_os: str) -> dict:
     """Navigate to the fingerprint page, wait for FP_READY, extract results."""
-    await c.call_tool("navigate", {"url": url, "target_os": target_os})
+    await c.call_tool("navigate", {"url": url, "target_os": target_os, "profile": "test"})
     status = tool_text(await c.call_tool("evaluate", {"script": WAIT_READY_JS}))
     assert status == "ready", f"Fingerprint page did not finish: {status}"
     raw = tool_text(await c.call_tool("evaluate", {"script": EXTRACT_JS}))

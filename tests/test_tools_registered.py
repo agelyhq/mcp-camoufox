@@ -34,13 +34,13 @@ async def test_all_tools_registered(client: Client) -> None:
 
 
 async def test_navigate_starts_session(client: Client, flask_server: str) -> None:
-    result = await client.call_tool("navigate", {"url": f"{flask_server}/"})
+    result = await client.call_tool("navigate", {"url": f"{flask_server}/", "profile": "test"})
     text = tool_text(result)
     assert "MCP Tool Test Pages" in text or "navigated" in text.lower()
 
 
 async def test_navigate_bad_url(client: Client) -> None:
-    result = await client.call_tool("navigate", {"url": "not-a-real-url"})
+    result = await client.call_tool("navigate", {"url": "not-a-real-url", "profile": "test"})
     text = tool_text(result)
     assert "error" in text.lower()
 

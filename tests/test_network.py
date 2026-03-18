@@ -8,7 +8,7 @@ from tests.helpers import extract_first_reqid, extract_uid, tool_text
 
 
 async def test_list_network_requests(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/network"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/network", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "Fetch /api/data")
 
@@ -20,7 +20,7 @@ async def test_list_network_requests(client: Client, flask_server: str) -> None:
 
 
 async def test_get_network_request_details(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/network"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/network", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "Fetch /api/data")
 
@@ -40,7 +40,7 @@ async def test_get_network_request_details(client: Client, flask_server: str) ->
 
 
 async def test_list_network_requests_filter(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/network"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/network", "profile": "test"})
     snap = tool_text(await client.call_tool("take_snapshot", {}))
     uid = extract_uid(snap, "POST /api/echo")
 
