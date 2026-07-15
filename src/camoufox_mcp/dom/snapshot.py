@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_JS_DIR = Path(__file__).resolve().parent.parent / "js"
+_JS_DIR = Path(__file__).resolve().parent / "js"
 
 _JS_CACHE: dict[str, str] = {}
 
