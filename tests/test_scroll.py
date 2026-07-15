@@ -1,37 +1,49 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
-from fastmcp import Client  # noqa: TC002
+from tests.helpers import PROFILE, evaluate, tool_text
 
-from tests.helpers import tool_text
+if TYPE_CHECKING:
+    from fastmcp import Client
+
+SCROLL_Y_JS = "Math.round(window.scrollY)"
 
 
 async def test_scroll_down(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/scroll", "profile": "test"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/scroll", "profile": PROFILE})
 
-    result = tool_text(await client.call_tool("scroll", {"direction": "down", "amount": 10}))
+    result = tool_text(
+        await client.call_tool("scroll", {"profile": PROFILE, "direction": "down", "amount": 600})
+    )
     assert "scrolled" in result.lower()
     await asyncio.sleep(0.3)
 
-    js = tool_text(await client.call_tool("evaluate", {"script": "Math.round(window.scrollY)"}))
+    js = await evaluate(client, PROFILE, SCROLL_Y_JS)
     assert int(js) > 0
 
 
 async def test_scroll_element_into_view(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/scroll", "profile": "test"})
+    await client.call_tool("navigate", {"url": f"{flask_server}/scroll", "profile": PROFILE})
 
-    js_before = tool_text(
-        await client.call_tool("evaluate", {"script": "Math.round(window.scrollY)"})
-    )
+    before = int(await evaluate(client, PROFILE, SCROLL_Y_JS))
 
-    await client.call_tool(
-        "evaluate",
-        {"script": "document.getElementById('section-10').scrollIntoView({behavior:'instant'})"},
+    await evaluate(
+        client,
+        PROFILE,
+        "document.getElementById('section-10').scrollIntoView({behavior:'instant'})",
     )
     await asyncio.sleep(0.3)
 
-    js_after = tool_text(
-        await client.call_tool("evaluate", {"script": "Math.round(window.scrollY)"})
+    after = int(await evaluate(client, PROFILE, SCROLL_Y_JS))
+    assert after > before
+
+
+async def test_scroll_invalid_direction(client: Client, flask_server: str) -> None:
+    await client.call_tool("navigate", {"url": f"{flask_server}/scroll", "profile": PROFILE})
+
+    result = tool_text(
+        await client.call_tool("scroll", {"profile": PROFILE, "direction": "sideways"})
     )
-    assert int(js_after) > int(js_before)
+    assert "error" in result.lower()

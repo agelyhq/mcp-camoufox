@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Fill Form Test{% endblock %}
+{% block content %}
+<h1>Fill Form Test</h1>
+<div class="section">
+  <form>
+    <label for="ff-first">First name</label>
+    <input type="text" id="ff-first" placeholder="First name"
+           oninput="document.getElementById('ff-first-out').textContent = this.value">
+    <div id="ff-first-out" class="output"></div>
+
+    <label for="ff-last">Last name</label>
+    <input type="text" id="ff-last" placeholder="Last name"
+           oninput="document.getElementById('ff-last-out').textContent = this.value">
+    <div id="ff-last-out" class="output"></div>
+
+    <label for="ff-city">City</label>
+    <input type="text" id="ff-city" placeholder="City"
+           oninput="document.getElementById('ff-city-out').textContent = this.value">
+    <div id="ff-city-out" class="output"></div>
+  </form>
+</div>
+{% endblock %}

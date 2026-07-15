@@ -94,6 +94,31 @@ def infinite_scroll_page():
     return render_template("infinite_scroll.html")
 
 
+@app.route("/hover")
+def hover_page():
+    return render_template("hover.html")
+
+
+@app.route("/drag")
+def drag_page():
+    return render_template("drag.html")
+
+
+@app.route("/fill-form")
+def fill_form_page():
+    return render_template("fill_form.html")
+
+
+@app.route("/type-text")
+def type_text_page():
+    return render_template("type_text.html")
+
+
+@app.route("/click-at")
+def click_at_page():
+    return render_template("click_at.html")
+
+
 # ---------------------------------------------------------------------------
 # API endpoints (for AJAX / network testing)
 # ---------------------------------------------------------------------------

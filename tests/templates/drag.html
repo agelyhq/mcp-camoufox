@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Drag Test{% endblock %}
+{% block extra_css %}
+  #drag-source { width: 90px; height: 90px; }
+  #drop-zone { width: 220px; height: 140px; margin-top: 20px; }
+{% endblock %}
+{% block content %}
+<h1>Drag Test</h1>
+<div class="section">
+  <button id="drag-source">Drag handle</button>
+  <button id="drop-zone">Drop target</button>
+  <div id="drag-output" class="output">not dropped</div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+  var dragging = false;
+  var source = document.getElementById('drag-source');
+  var output = document.getElementById('drag-output');
+
+  source.addEventListener('mousedown', function () { dragging = true; });
+  document.addEventListener('mouseup', function (e) {
+    if (!dragging) return;
+    dragging = false;
+    var el = document.elementFromPoint(e.clientX, e.clientY);
+    if (el && el.closest('#drop-zone')) {
+      output.textContent = 'dropped';
+    }
+  });
+</script>
+{% endblock %}

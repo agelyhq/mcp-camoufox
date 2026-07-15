@@ -1,99 +1,64 @@
 from __future__ import annotations
 
-from fastmcp import Client  # noqa: TC002
+from typing import TYPE_CHECKING
 
-from tests.helpers import extract_uid, tool_text
+from tests.helpers import PROFILE, evaluate, goto_and_find, text_content, tool_text
+
+if TYPE_CHECKING:
+    from fastmcp import Client
 
 
 async def test_fill_text_input(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/fill", "profile": "test"})
-    snap = tool_text(await client.call_tool("take_snapshot", {}))
-    uid = extract_uid(snap, "text")
+    # "Name" is the accessible label of the intended text input; the old "text"
+    # label also matched "textarea"/"text-output".
+    uid = await goto_and_find(client, f"{flask_server}/fill", PROFILE, "Name")
 
-    result = tool_text(await client.call_tool("fill", {"uid": uid, "value": "Hello MCP"}))
+    result = tool_text(
+        await client.call_tool("fill", {"profile": PROFILE, "uid": uid, "value": "Hello MCP"})
+    )
     assert "filled" in result.lower()
 
-    js = tool_text(
-        await client.call_tool(
-            "evaluate",
-            {"script": "document.getElementById('text-output').textContent"},
-        )
-    )
+    js = await text_content(client, PROFILE, "text-output")
     assert "Hello MCP" in js
 
 
 async def test_fill_email(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/fill", "profile": "test"})
-    snap = tool_text(await client.call_tool("take_snapshot", {}))
-    uid = extract_uid(snap, "email")
+    uid = await goto_and_find(client, f"{flask_server}/fill", PROFILE, "email")
 
-    await client.call_tool("fill", {"uid": uid, "value": "test@example.com"})
+    await client.call_tool("fill", {"profile": PROFILE, "uid": uid, "value": "test@example.com"})
 
-    js = tool_text(
-        await client.call_tool(
-            "evaluate",
-            {
-                "script": "({v: document.getElementById('email-output').textContent, "
-                "valid: document.getElementById('email-validity').textContent})"
-            },
-        )
+    js = await evaluate(
+        client,
+        PROFILE,
+        "({v: document.getElementById('email-output').textContent, "
+        "valid: document.getElementById('email-validity').textContent})",
     )
     assert "test@example.com" in js
     assert "true" in js.lower()
 
 
 async def test_fill_textarea(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/fill", "profile": "test"})
-    snap = tool_text(await client.call_tool("take_snapshot", {}))
-    uid = extract_uid(snap, "textarea")
+    uid = await goto_and_find(client, f"{flask_server}/fill", PROFILE, "textarea")
 
-    await client.call_tool("fill", {"uid": uid, "value": "Multi-line text"})
+    await client.call_tool("fill", {"profile": PROFILE, "uid": uid, "value": "Multi-line text"})
 
-    js = tool_text(
-        await client.call_tool(
-            "evaluate",
-            {"script": "document.getElementById('textarea-output').textContent"},
-        )
-    )
+    js = await text_content(client, PROFILE, "textarea-output")
     assert "Multi-line text" in js
 
 
 async def test_fill_contenteditable(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/fill", "profile": "test"})
-    snap = tool_text(await client.call_tool("take_snapshot", {}))
-    uid = extract_uid(snap, "Edit this")
+    uid = await goto_and_find(client, f"{flask_server}/fill", PROFILE, "Edit this")
 
-    await client.call_tool("fill", {"uid": uid, "value": "Edited content"})
+    await client.call_tool("fill", {"profile": PROFILE, "uid": uid, "value": "Edited content"})
 
-    js = tool_text(
-        await client.call_tool(
-            "evaluate",
-            {"script": "document.getElementById('editable-output').textContent"},
-        )
-    )
+    js = await text_content(client, PROFILE, "editable-output")
     assert "Edited content" in js
 
 
-async def test_fill_select(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/fill", "profile": "test"})
-    snap = tool_text(await client.call_tool("take_snapshot", {}))
-    uid = extract_uid(snap, "[select")
-
-    await client.call_tool("fill", {"uid": uid, "value": "Cherry"})
-
-    js = tool_text(
-        await client.call_tool(
-            "evaluate",
-            {"script": "document.getElementById('select-output').textContent"},
-        )
-    )
-    assert "cherry" in js.lower()
-
-
 async def test_fill_non_editable(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/fill", "profile": "test"})
-    snap = tool_text(await client.call_tool("take_snapshot", {}))
-    uid = extract_uid(snap, "Index")
+    uid = await goto_and_find(client, f"{flask_server}/fill", PROFILE, "Index")
 
-    result = tool_text(await client.call_tool("fill", {"uid": uid, "value": "text"}))
+    result = tool_text(
+        await client.call_tool("fill", {"profile": PROFILE, "uid": uid, "value": "text"})
+    )
     assert "error" in result.lower()

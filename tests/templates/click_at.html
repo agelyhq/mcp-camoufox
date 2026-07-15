@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Click At Test{% endblock %}
+{% block extra_css %}
+  #click-area { width: 400px; height: 300px; background: #eef; border: 1px solid #99c;
+    display: flex; align-items: center; justify-content: center; }
+{% endblock %}
+{% block content %}
+<h1>Click At Test</h1>
+<div class="section">
+  <div id="click-area"
+       onclick="document.getElementById('coord-output').textContent =
+         'clicked at ' + Math.round(event.clientX) + ',' + Math.round(event.clientY)">
+    Click anywhere in this box
+  </div>
+  <div id="coord-output" class="output">no click</div>
+</div>
+{% endblock %}
