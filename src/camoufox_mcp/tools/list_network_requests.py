@@ -1,49 +1,71 @@
 from __future__ import annotations
 
-from fastmcp import Context, FastMCP  # noqa: TC002
+from typing import TYPE_CHECKING
 
-from camoufox_mcp.tools._context import get_page
+from camoufox_mcp.sessions import format_status
+from camoufox_mcp.tools._base import get_page, get_session, tool
+
+if TYPE_CHECKING:
+    from fastmcp import FastMCP
+
+    from camoufox_mcp.sessions import NetworkEntry
+    from camoufox_mcp.tools._base import ToolDeps
+
+_DEFAULT_PAGE_SIZE = 50
 
 
-def register(mcp: FastMCP) -> None:
-    @mcp.tool()
+def register(mcp: FastMCP, deps: ToolDeps) -> None:
+    @tool(mcp, deps)
     async def list_network_requests(
-        ctx: Context,
+        profile: str,
         resource_types: list[str] | None = None,
-        page_size: int | None = None,
+        page_size: int = _DEFAULT_PAGE_SIZE,
         page_idx: int = 0,
         include_preserved: bool = False,
     ) -> str:
-        """List captured network requests for the active page since the last navigation.
+        """List HTTP requests captured on the active tab, most-recent order preserved.
 
-        Args:
-            resource_types: Filter by resource type (e.g. xhr, fetch, document, script).
-                           When omitted, returns all types.
-            page_size: Max number of requests to return. Omit to return all.
-            page_idx: Page number (0-based) for pagination.
-            include_preserved: Include requests from previous navigations (up to 3).
+        Requests are recorded chronologically by the per-tab network monitor. Each
+        line shows the request id (use it with ``get_network_request`` to fetch the
+        response body), method, status, resource type and URL. A status of
+        ``pending`` means no response has arrived yet; ``failed`` means the request
+        errored.
+
+        Params:
+        - profile: session/profile name (required). The session is created lazily
+          if it does not exist yet.
+        - resource_types: optional filter, e.g. ["document", "xhr", "fetch",
+          "script", "stylesheet", "image", "font"]. Case-insensitive.
+        - page_size: max entries per page (default 50).
+        - page_idx: zero-based page index into the filtered result set.
+        - include_preserved: also include requests captured before the last
+          navigation (default False).
+
+        Returns a text listing plus a summary line with the total match count and
+        pagination info. Returns "No network requests captured." when empty.
+
+        Errors: "Error: ProfileInUseError: ..." if the profile is locked by another
+        process; "Error: RuntimeError: ..." if the session has no active page.
         """
-        try:
-            page = get_page(ctx)
-            entries, total = page.network.list_entries(
-                resource_types=resource_types,
-                page_size=page_size,
-                page_idx=page_idx,
-                include_preserved=include_preserved,
-            )
+        session = await get_session(deps, profile)
+        page = get_page(session)
+        entries, total = page.network.list_entries(
+            resource_types=resource_types,
+            page_size=page_size,
+            page_idx=page_idx,
+            include_preserved=include_preserved,
+        )
+        if total == 0:
+            return "No network requests captured."
 
-            if not entries:
-                return "No network requests captured."
+        lines = [_format_entry(e) for e in entries]
+        shown = len(entries)
+        first = page_idx * page_size
+        header = (
+            f"Network requests {first + 1}-{first + shown} of {total} "
+            f"(page {page_idx}, page_size {page_size}):"
+        )
+        return header + "\n" + "\n".join(lines)
 
-            lines = [f"Network requests ({len(entries)}/{total} total):"]
-            lines.append(f"{'reqid':>5}  {'method':<7} {'status':>6}  {'type':<10} url")
-            lines.append("-" * 80)
-            for e in entries:
-                status = str(e.status) if e.status is not None else "..."
-                lines.append(
-                    f"{e.reqid:>5}  {e.method:<7} {status:>6}  {e.resource_type:<10} {e.url}"
-                )
-
-            return "\n".join(lines)
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
+    def _format_entry(e: NetworkEntry) -> str:
+        return f"[{e.reqid}] {e.method} {format_status(e.status)} {e.resource_type} {e.url}"

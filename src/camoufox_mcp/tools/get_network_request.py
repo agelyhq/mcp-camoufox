@@ -1,83 +1,83 @@
 from __future__ import annotations
 
-import json
+from typing import TYPE_CHECKING
 
-from fastmcp import Context, FastMCP  # noqa: TC002
+from camoufox_mcp.sessions import format_status
+from camoufox_mcp.tools._base import get_page, get_session, tool
 
-from camoufox_mcp.tools._context import get_page
+if TYPE_CHECKING:
+    from fastmcp import FastMCP
 
-MAX_BODY_SIZE = 50000
+    from camoufox_mcp.tools._base import ToolDeps
+
+_DEFAULT_MAX_BODY = 50000
+_HEADER_LIMIT = 40
 
 
-def register(mcp: FastMCP) -> None:
-    @mcp.tool()
+def register(mcp: FastMCP, deps: ToolDeps) -> None:
+    @tool(mcp, deps)
     async def get_network_request(
+        profile: str,
         reqid: int,
-        ctx: Context,
         include_body: bool = True,
-        max_body_size: int = MAX_BODY_SIZE,
+        max_body_size: int = _DEFAULT_MAX_BODY,
     ) -> str:
-        """Get full details of a network request by its reqid.
+        """Get full details for one captured network request by its id.
 
-        Use list_network_requests first to find the reqid you need.
+        Use ``list_network_requests`` first to discover request ids. Returns the
+        method, URL, resource type, status, request/response headers, POST data (if
+        any) and, when available, the response body (truncated past
+        ``max_body_size``).
 
-        Args:
-            reqid: The request ID from list_network_requests.
-            include_body: Whether to fetch the response body (default: true).
-            max_body_size: Max response body chars to return (default: 50000).
+        Params:
+        - profile: session/profile name (required).
+        - reqid: the numeric request id from ``list_network_requests`` (required).
+        - include_body: fetch and include the response body (default True). Bodies
+          are only available for completed responses still held by the browser.
+        - max_body_size: max response-body characters before truncation
+          (default 50000).
+
+        Returns a formatted text report, or "No request found with id <reqid>." if
+        the id is unknown or has been evicted from the buffer.
+
+        Errors: "Error: ProfileInUseError: ..." if the profile is locked;
+        "Error: RuntimeError: ..." if there is no active page.
         """
-        try:
-            page = get_page(ctx)
-            entry = page.network.get_entry(reqid)
-            if entry is None:
-                return f"Error: No request found with reqid={reqid}"
+        session = await get_session(deps, profile)
+        page = get_page(session)
+        entry = page.network.get_entry(reqid)
+        if entry is None:
+            return f"No request found with id {reqid}."
 
-            lines = [
-                f"Request #{entry.reqid}",
-                f"  URL: {entry.url}",
-                f"  Method: {entry.method}",
-                f"  Resource type: {entry.resource_type}",
-                "",
-                "Request headers:",
-            ]
-            for k, v in entry.request_headers.items():
-                lines.append(f"  {k}: {v}")
+        status = format_status(entry.status)
 
-            if entry.post_data:
-                lines.append("")
-                lines.append("Request body:")
-                lines.append(_format_body(entry.post_data))
+        lines = [
+            f"Request [{entry.reqid}] {entry.method} {entry.url}",
+            f"Resource type: {entry.resource_type}",
+            f"Status: {status}",
+            "",
+            "Request headers:",
+            _format_headers(entry.request_headers),
+        ]
+        if entry.post_data:
+            lines += ["", "POST data:", entry.post_data]
+        lines += [
+            "",
+            "Response headers:",
+            _format_headers(entry.response_headers or {}),
+        ]
 
-            lines.append("")
-            if entry.status is None:
-                lines.append("Response: pending")
-            elif entry.status == 0:
-                lines.append("Response: failed")
-            else:
-                lines.append(f"Response status: {entry.status}")
+        if include_body:
+            body = await page.network.get_response_body(entry, max_size=max_body_size)
+            lines += ["", "Response body:", body if body is not None else "<unavailable>"]
 
-                if entry.response_headers:
-                    lines.append("Response headers:")
-                    for k, v in entry.response_headers.items():
-                        lines.append(f"  {k}: {v}")
+        return "\n".join(lines)
 
-                if include_body:
-                    body = await page.network.get_response_body(entry, max_size=max_body_size)
-                    if body is not None:
-                        lines.append("")
-                        lines.append("Response body:")
-                        lines.append(_format_body(body))
-                    else:
-                        lines.append("Response body: unavailable")
-
-            return "\n".join(lines)
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
-
-
-def _format_body(body: str) -> str:
-    try:
-        parsed = json.loads(body)
-        return json.dumps(parsed, indent=2, ensure_ascii=False)
-    except (json.JSONDecodeError, TypeError):
-        return body
+    def _format_headers(headers: dict[str, str]) -> str:
+        if not headers:
+            return "  <none>"
+        items = list(headers.items())[:_HEADER_LIMIT]
+        text = "\n".join(f"  {k}: {v}" for k, v in items)
+        if len(headers) > _HEADER_LIMIT:
+            text += f"\n  ... ({len(headers) - _HEADER_LIMIT} more)"
+        return text

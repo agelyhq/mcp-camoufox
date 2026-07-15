@@ -1,60 +1,81 @@
 from __future__ import annotations
 
-from fastmcp import Context, FastMCP  # noqa: TC002
+from typing import TYPE_CHECKING
 
-from camoufox_mcp.browser.config import VALID_OS, SessionParams
-from camoufox_mcp.tools._context import get_manager
+from camoufox_mcp.config import VALID_OS
+from camoufox_mcp.tools._base import get_page, get_session, tool
+
+if TYPE_CHECKING:
+    from fastmcp import FastMCP
+
+    from camoufox_mcp.tools._base import ToolDeps
 
 
-def register(mcp: FastMCP) -> None:
-    @mcp.tool()
+def register(mcp: FastMCP, deps: ToolDeps) -> None:
+    @tool(mcp, deps)
     async def navigate(
-        url: str,
         profile: str,
-        ctx: Context,
+        url: str,
+        fingerprint_os: str | None = None,
+        viewport_width: int | None = None,
+        viewport_height: int | None = None,
+        locale: str | None = None,
+        block_images: bool | None = None,
+        block_webrtc: bool | None = None,
         timeout: int = 30000,
-        target_os: str = "windows",
-        viewport_width: int = 1280,
-        viewport_height: int = 800,
-        block_images: bool = False,
-        block_webrtc: bool = False,
     ) -> str:
-        """Navigate the active page to a URL. Starts a browser session automatically if needed.
+        """Navigate a profile's active tab to a URL, lazily creating the session.
 
-        Session parameters are only used when starting a new session. If a session
-        is already running, they are ignored.
+        On the first call for a profile a fresh Camoufox browser is launched with an
+        anti-detect fingerprint. The optional session-creation parameters below are
+        applied ONLY at that first launch; on later calls for an already-active
+        profile they are ignored (the return value notes this). Each profile keeps a
+        persistent on-disk state (cookies, storage) across launches.
 
         Args:
-            url: Absolute URL to navigate to
-            profile: Profile name for persistent context (cookies/storage survive restarts).
-                     Resolved under CAMOUFOX_PROFILES_DIR. Downloaded from S3 if configured.
-            timeout: Max wait time in ms (default 30000)
-            target_os: Fingerprint target OS — windows, linux, or macos (default: windows)
-            viewport_width: Browser viewport width in pixels (default: 1280)
-            viewport_height: Browser viewport height in pixels (default: 800)
-            block_images: Block image loading for faster browsing (default: false)
-            block_webrtc: Block WebRTC to prevent IP leaks (default: false)
+            profile: Session identifier. Reused across calls; created on demand.
+            url: Absolute URL to load (include the scheme, e.g. https://).
+            fingerprint_os: Spoofed OS for the fingerprint — one of windows, macos,
+                linux. Creation-only. Defaults to the server's configured value.
+            viewport_width: Viewport width in pixels. Creation-only.
+            viewport_height: Viewport height in pixels. Creation-only.
+            locale: Browser locale (e.g. "en-US", "fr-FR"). Creation-only.
+            block_images: If true, image loading is blocked. Creation-only.
+            block_webrtc: If true, WebRTC is blocked. Creation-only.
+            timeout: Navigation timeout in milliseconds (default 30000).
+
+        Returns:
+            "Navigated to: <title> (<url>)". When creation options were supplied but
+            the session already existed, an "(options ignored: ...)" note is appended.
+
+        Errors:
+            Returns "Error: ValueError: ..." for an invalid fingerprint_os,
+            "Error: ProfileInUseError: ..." if the profile is locked by another
+            process, and "Timeout: ..." if the page does not finish loading in time.
         """
-        try:
-            manager = get_manager(ctx)
+        if fingerprint_os is not None and fingerprint_os.lower() not in VALID_OS:
+            raise ValueError(
+                f"invalid fingerprint_os '{fingerprint_os}'; "
+                f"must be one of {', '.join(sorted(VALID_OS))}"
+            )
 
-            if not manager.is_running:
-                if target_os not in VALID_OS:
-                    return f"Error: Invalid target_os={target_os!r}. Must be one of: {', '.join(sorted(VALID_OS))}"
-                params = SessionParams(
-                    profile=profile,
-                    target_os=target_os,
-                    viewport_width=viewport_width,
-                    viewport_height=viewport_height,
-                    block_images=block_images,
-                    block_webrtc=block_webrtc,
-                )
-                await manager.start_session(params)
+        init_opts = {
+            "fingerprint_os": fingerprint_os.lower() if fingerprint_os else None,
+            "viewport_width": viewport_width,
+            "viewport_height": viewport_height,
+            "locale": locale,
+            "block_images": block_images,
+            "block_webrtc": block_webrtc,
+        }
+        supplied = {k: v for k, v in init_opts.items() if v is not None}
 
-            page = manager.active_page
-            result = await page.navigate(url, timeout=timeout / 1000)
-            return f"Navigated to: {result['title']} ({result['url']})"
-        except TimeoutError as e:
-            return f"Timeout: {e}"
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
+        already_active = deps.sessions.get(profile) is not None
+        session = await get_session(deps, profile, **supplied)
+        page = get_page(session)
+        await page.raw.goto(url, timeout=timeout, wait_until="load")
+        page.record_navigation(page.url)
+
+        result = f"Navigated to: {await page.title()} ({page.url})"
+        if supplied and already_active:
+            result += f" (options ignored: {', '.join(sorted(supplied))}; session already active)"
+        return result

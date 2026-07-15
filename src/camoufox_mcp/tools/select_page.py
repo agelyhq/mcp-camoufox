@@ -1,27 +1,34 @@
 from __future__ import annotations
 
-from fastmcp import Context, FastMCP  # noqa: TC002
+from typing import TYPE_CHECKING
 
-from camoufox_mcp.tools._context import get_manager
+from camoufox_mcp.tools._base import get_page, get_session, tool
+
+if TYPE_CHECKING:
+    from fastmcp import FastMCP
+
+    from camoufox_mcp.tools._base import ToolDeps
 
 
-def register(mcp: FastMCP) -> None:
-    @mcp.tool()
-    async def select_page(page_idx: int, ctx: Context) -> str:
-        """Switch the active browser tab.
+def register(mcp: FastMCP, deps: ToolDeps) -> None:
+    @tool(mcp, deps)
+    async def select_page(profile: str, page_idx: int) -> str:
+        """Make a tab the active one for subsequent tool calls.
+
+        Subsequent tools (navigate, snapshot, click, ...) act on the active tab.
+        Use `list_pages` to discover valid indices.
 
         Args:
-            page_idx: Page index from get_page_info
-        """
-        try:
-            manager = get_manager(ctx)
-            if page_idx not in manager.pages:
-                available = sorted(manager.pages.keys())
-                return f"Error: No page at index {page_idx}. Available: {available}"
+            profile: An already-active session identifier.
+            page_idx: Stable index of the tab to activate (from `list_pages`).
 
-            manager.active_page_idx = page_idx
-            handle = manager.pages[page_idx].handle
-            title = await handle.get_title()
-            return f"Switched to page [{page_idx}]: {title} | {handle.url}"
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
+        Returns:
+            "Selected tab [<page_idx>]: <title> (<url>)".
+
+        Errors:
+            Returns "Error: ValueError: ..." if no tab has the given index.
+        """
+        session = await get_session(deps, profile)
+        session.select_page(page_idx)
+        page = get_page(session)
+        return f"Selected tab [{page_idx}]: {await page.title()} ({page.url})"

@@ -1,57 +1,31 @@
 from __future__ import annotations
 
+import importlib
+import logging
+import pkgutil
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
-from camoufox_mcp.tools import (
-    click,
-    close_page,
-    evaluate,
-    fill,
-    get_content,
-    get_network_request,
-    get_page_info,
-    handle_dialog,
-    kill_session,
-    list_console_messages,
-    list_network_requests,
-    navigate,
-    new_page,
-    press_key,
-    scroll,
-    select_page,
-    take_screenshot,
-    take_snapshot,
-    upload_file,
-    wait_for,
-)
+    from camoufox_mcp.tools._base import ToolDeps
 
-_TOOL_MODULES = [
-    navigate,
-    kill_session,
-    take_snapshot,
-    take_screenshot,
-    click,
-    fill,
-    press_key,
-    scroll,
-    wait_for,
-    evaluate,
-    get_content,
-    get_page_info,
-    list_console_messages,
-    list_network_requests,
-    get_network_request,
-    select_page,
-    new_page,
-    close_page,
-    handle_dialog,
-    upload_file,
-]
+logger = logging.getLogger(__name__)
 
 
-def register_all_tools(mcp: FastMCP) -> None:
-    for module in _TOOL_MODULES:
-        module.register(mcp)
+def register_all_tools(mcp: FastMCP, deps: ToolDeps) -> None:
+    """Auto-discover every tool module in this package and register it.
+
+    Each public module (name not starting with ``_``) must expose
+    ``register(mcp, deps) -> None``. Discovery is dynamic so parallel authors can
+    add tool files without touching a shared list.
+    """
+    for module_info in pkgutil.iter_modules(__path__):
+        if module_info.name.startswith("_"):
+            continue
+        module = importlib.import_module(f"{__name__}.{module_info.name}")
+        register = getattr(module, "register", None)
+        if register is None:
+            logger.warning("Tool module %s has no register(mcp, deps); skipping", module_info.name)
+            continue
+        register(mcp, deps)

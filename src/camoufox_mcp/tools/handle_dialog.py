@@ -1,33 +1,38 @@
 from __future__ import annotations
 
-from fastmcp import Context, FastMCP  # noqa: TC002
+from typing import TYPE_CHECKING
 
-from camoufox_mcp.tools._context import get_page
+from camoufox_mcp.tools._base import get_page, get_session, tool
+
+if TYPE_CHECKING:
+    from fastmcp import FastMCP
+
+    from camoufox_mcp.tools._base import ToolDeps
 
 
-def register(mcp: FastMCP) -> None:
-    @mcp.tool()
-    async def handle_dialog(action: str, ctx: Context, prompt_text: str | None = None) -> str:
-        """Handle a browser dialog (alert, confirm, prompt).
+def register(mcp: FastMCP, deps: ToolDeps) -> None:
+    @tool(mcp, deps)
+    async def handle_dialog(profile: str, action: str, prompt_text: str | None = None) -> str:
+        """Respond to a pending JavaScript dialog (alert / confirm / prompt / beforeunload).
 
-        Args:
-            action: 'accept' or 'dismiss'
-            prompt_text: Text to enter for prompt dialogs (optional)
+        A dialog raised by the page is captured automatically; call this to accept or
+        dismiss it so the page can continue.
+
+        Parameters:
+        - profile: session/profile name.
+        - action: ``accept`` or ``dismiss``.
+        - prompt_text: text to submit for a ``prompt`` dialog when accepting (ignored
+          for other dialog types and when dismissing).
+
+        Returns a confirmation like ``Dialog accepted``.
+
+        Errors:
+        - ``Error: ValueError: action must be 'accept' or 'dismiss'``.
+        - ``Error: RuntimeError: No dialog is pending`` when nothing is waiting.
         """
-        try:
-            if action not in ("accept", "dismiss"):
-                return "Error: action must be 'accept' or 'dismiss'"
-
-            page = get_page(ctx)
-            info = page.get_dialog_info()
-            if info is None:
-                return "Error: No dialog is currently pending"
-
-            dialog_type = info["type"]
-            dialog_message = info["message"]
-
-            await page.respond_to_dialog(action, prompt_text)
-
-            return f"Dialog {action}ed — type: {dialog_type}, message: {dialog_message!r}"
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
+        if action not in ("accept", "dismiss"):
+            raise ValueError("action must be 'accept' or 'dismiss'")
+        session = await get_session(deps, profile)
+        page = get_page(session)
+        await page.respond_to_dialog(action, prompt_text)
+        return f"Dialog {action}ed"

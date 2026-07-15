@@ -1,46 +1,57 @@
 from __future__ import annotations
 
-from fastmcp import Context, FastMCP  # noqa: TC002
+from typing import TYPE_CHECKING
 
-from camoufox_mcp.tools._context import get_page
+from camoufox_mcp.tools._base import get_page, get_session, tool
+
+if TYPE_CHECKING:
+    from fastmcp import FastMCP
+
+    from camoufox_mcp.tools._base import ToolDeps
+
+_DEFAULT_LIMIT = 50
 
 
-def register(mcp: FastMCP) -> None:
-    @mcp.tool()
+def register(mcp: FastMCP, deps: ToolDeps) -> None:
+    @tool(mcp, deps)
     async def list_console_messages(
-        ctx: Context,
+        profile: str,
         levels: list[str] | None = None,
-        limit: int = 50,
+        limit: int = _DEFAULT_LIMIT,
         include_preserved: bool = False,
     ) -> str:
-        """List captured browser console messages for the active page.
+        """List console messages emitted by the active tab's page.
 
-        Useful for debugging — shows errors, warnings, and log output from the page.
+        Messages are captured chronologically by the per-tab console monitor. Each
+        line shows the message id, level, source location and text. Useful for
+        diagnosing JavaScript errors, warnings and page logging.
 
-        Args:
-            levels: Filter by level (e.g. error, warning, log, info, debug).
-                   When omitted, returns all levels.
-            limit: Max number of messages to return (default: 50, most recent).
-            include_preserved: Include messages from previous navigations.
+        Params:
+        - profile: session/profile name (required). The session is created lazily.
+        - levels: optional filter by console level, e.g. ["error", "warning",
+          "log", "info", "debug"]. Case-insensitive.
+        - limit: max number of most-recent matching messages to return
+          (default 50).
+        - include_preserved: also include messages captured before the last
+          navigation (default False).
+
+        Returns a text listing, or "No console messages captured." when empty.
+
+        Errors: "Error: ProfileInUseError: ..." if the profile is locked;
+        "Error: RuntimeError: ..." if there is no active page.
         """
-        try:
-            page = get_page(ctx)
-            entries = page.console.list_entries(
-                levels=levels,
-                limit=limit,
-                include_preserved=include_preserved,
-            )
+        session = await get_session(deps, profile)
+        page = get_page(session)
+        entries = page.console.list_entries(
+            levels=levels,
+            limit=limit,
+            include_preserved=include_preserved,
+        )
+        if not entries:
+            return "No console messages captured."
 
-            if not entries:
-                return "No console messages captured."
-
-            lines = [f"Console messages ({len(entries)}):"]
-            lines.append(f"{'msgid':>5}  {'level':<8} message")
-            lines.append("-" * 80)
-            for e in entries:
-                location = f" ({e.url}:{e.line_number})" if e.url else ""
-                lines.append(f"{e.msgid:>5}  {e.level:<8} {e.text}{location}")
-
-            return "\n".join(lines)
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
+        lines = []
+        for e in entries:
+            loc = f" ({e.url}:{e.line_number})" if e.url else ""
+            lines.append(f"[{e.msgid}] {e.level.upper()}{loc}: {e.text}")
+        return f"Console messages ({len(entries)}):\n" + "\n".join(lines)

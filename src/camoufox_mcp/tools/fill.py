@@ -1,48 +1,39 @@
 from __future__ import annotations
 
-from fastmcp import Context, FastMCP  # noqa: TC002
+from typing import TYPE_CHECKING
 
-from camoufox_mcp.dom import clear_field, resolve_uid, scroll_into_view, uid_selector
-from camoufox_mcp.tools._context import get_page
+from camoufox_mcp.dom import fill_field
+from camoufox_mcp.tools._base import get_page, get_session, tool
+
+if TYPE_CHECKING:
+    from fastmcp import FastMCP
+
+    from camoufox_mcp.tools._base import ToolDeps
 
 
-def register(mcp: FastMCP) -> None:
-    @mcp.tool()
-    async def fill(uid: str, value: str, ctx: Context, clear_first: bool = True) -> str:
-        """Fill a text input, textarea, or contenteditable element.
+def register(mcp: FastMCP, deps: ToolDeps) -> None:
+    @tool(mcp, deps)
+    async def fill(profile: str, uid: str, value: str, clear_first: bool = True) -> str:
+        """Type text into an input, textarea or contenteditable element by uid.
 
-        Args:
-            uid: Element UID from take_snapshot
-            value: Text to enter
-            clear_first: Clear existing content before typing (default: true)
+        The element is focused and the value is typed. Take a ``snapshot`` first to
+        obtain uids.
+
+        Parameters:
+        - profile: session/profile name.
+        - uid: uid of the field from the latest snapshot.
+        - value: text to enter.
+        - clear_first: when true (default) the existing content is cleared before
+          typing; when false the value is appended after the current content.
+
+        Returns a confirmation like ``Filled <input> with 12 chars``.
+
+        Errors:
+        - ``Error: ValueError: unknown or stale uid '<uid>'; take a new snapshot`` when
+          the uid is invalid or the page changed since the snapshot.
+        - ``Error: ValueError: element <tag> is not editable; ...`` when the target is
+          not an input, textarea, select or contenteditable element.
         """
-        try:
-            page = get_page(ctx)
-            info = await resolve_uid(page, uid)
-            if "error" in info:
-                return f"Error: {info['error']}"
-            if not info.get("editable"):
-                return f"Error: Element {uid} ({info['tag']}) is not editable"
-
-            truncated = value[:50] + ("..." if len(value) > 50 else "")
-
-            if info["tag"] == "select":
-                await page.select_option(uid_selector(uid), value)
-                return f"Filled {info['tag']} ({uid}) with: {truncated}"
-
-            await scroll_into_view(page, uid)
-            info = await resolve_uid(page, uid)
-            if "error" in info:
-                return f"Error: {info['error']}"
-
-            await page.click_at(info["x"], info["y"])
-
-            if clear_first:
-                result = await clear_field(page, uid)
-                if "error" in result:
-                    return f"Error: {result['error']}"
-
-            await page.insert_text(value)
-            return f"Filled {info['tag']} ({uid}) with: {truncated}"
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
+        session = await get_session(deps, profile)
+        page = get_page(session)
+        return await fill_field(page, uid, value, clear_first)

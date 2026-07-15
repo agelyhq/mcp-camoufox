@@ -1,53 +1,61 @@
 from __future__ import annotations
 
-from fastmcp import Context, FastMCP  # noqa: TC002
+from typing import TYPE_CHECKING
 
-from camoufox_mcp.tools._context import get_page
+from camoufox_mcp.tools._base import get_page, get_session, tool
 
-_VALID_CONDITIONS = frozenset({"load", "selector", "idle"})
+if TYPE_CHECKING:
+    from fastmcp import FastMCP
+
+    from camoufox_mcp.tools._base import ToolDeps
+
+_VALID_CONDITIONS = ("load", "selector", "network_idle")
 
 
-def register(mcp: FastMCP) -> None:
-    @mcp.tool()
+def register(mcp: FastMCP, deps: ToolDeps) -> None:
+    @tool(mcp, deps)
     async def wait_for(
-        ctx: Context,
-        condition: str = "load",
+        profile: str,
+        condition: str,
         selector: str | None = None,
-        timeout: int = 10000,
+        timeout: int = 30000,
     ) -> str:
-        """Wait for a page condition before proceeding.
+        """Wait for a page condition on the profile's active tab.
 
         Args:
-            condition: 'load' | 'selector' | 'idle'
-            selector: CSS selector (required when condition='selector')
-            timeout: Max wait time in ms
+            profile: An already-active session identifier.
+            condition: One of:
+                - "load": wait for the document load event to fire.
+                - "selector": wait for `selector` to appear in the DOM (requires
+                  the `selector` argument, a CSS selector).
+                - "network_idle": wait until there are no network connections for
+                  at least 500 ms.
+            selector: CSS selector to wait for. Required (and only used) when
+                condition is "selector".
+            timeout: Maximum wait in milliseconds (default 30000).
+
+        Returns:
+            "Condition met: <condition>" (with the selector appended for the
+            "selector" case) once the wait resolves.
+
+        Errors:
+            Returns "Error: ValueError: ..." for an unknown condition or a missing
+            selector, and "Timeout: ..." if the condition is not met in time.
         """
-        try:
-            if condition not in _VALID_CONDITIONS:
-                return f"Error: condition must be one of: {', '.join(sorted(_VALID_CONDITIONS))}"
+        if condition not in _VALID_CONDITIONS:
+            raise ValueError(
+                f"invalid condition '{condition}'; must be one of {', '.join(_VALID_CONDITIONS)}"
+            )
 
-            page = get_page(ctx)
+        session = await get_session(deps, profile)
+        page = get_page(session)
 
-            if condition == "load":
-                try:
-                    await page.wait_for_load_state("load", timeout=timeout)
-                    return "Page loaded"
-                except TimeoutError:
-                    return f"Timeout waiting for page load ({timeout}ms)"
+        if condition == "selector":
+            if not selector:
+                raise ValueError("condition 'selector' requires a non-empty selector")
+            await page.raw.wait_for_selector(selector, timeout=timeout)
+            return f"Condition met: selector ({selector})"
 
-            if condition == "selector":
-                if not selector:
-                    return "Error: selector param required when condition='selector'"
-                try:
-                    await page.wait_for_selector(selector, timeout=timeout)
-                    return f"Element '{selector}' found"
-                except TimeoutError:
-                    return f"Timeout waiting for '{selector}' ({timeout}ms)"
-
-            try:
-                await page.wait_for_load_state("networkidle", timeout=timeout)
-                return "Network idle"
-            except TimeoutError:
-                return f"Timeout waiting for network idle ({timeout}ms)"
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
+        state = "load" if condition == "load" else "networkidle"
+        await page.raw.wait_for_load_state(state, timeout=timeout)
+        return f"Condition met: {condition}"

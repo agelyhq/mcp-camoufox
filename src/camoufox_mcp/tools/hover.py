@@ -13,18 +13,18 @@ if TYPE_CHECKING:
 
 def register(mcp: FastMCP, deps: ToolDeps) -> None:
     @tool(mcp, deps)
-    async def click(profile: str, uid: str, double_click: bool = False) -> str:
-        """Click an interactive element identified by its snapshot uid.
+    async def hover(profile: str, uid: str) -> str:
+        """Move the mouse over an element identified by its snapshot uid.
 
-        Take a ``snapshot`` first to obtain uids (the ``eN`` markers). The element is
-        scrolled into view and clicked at its center.
+        Useful to reveal hover menus, tooltips or lazy-loaded content. Take a
+        ``snapshot`` first to obtain uids. The element is scrolled into view and the
+        pointer is moved to its center.
 
         Parameters:
         - profile: session/profile name.
-        - uid: element uid from the latest snapshot (e.g. ``e12``).
-        - double_click: when true, performs a double click instead of a single click.
+        - uid: element uid from the latest snapshot (e.g. ``e7``).
 
-        Returns a confirmation like ``Clicked <button> at (x, y)``.
+        Returns a confirmation like ``Hovered <a> at (x, y)``.
 
         Errors:
         - ``Error: ValueError: unknown or stale uid '<uid>'; take a new snapshot`` when
@@ -33,6 +33,5 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
         session = await get_session(deps, profile)
         page = get_page(session)
         x, y, tag = await resolve_center(page, uid)
-        await page.raw.mouse.click(x, y, click_count=2 if double_click else 1)
-        verb = "Double-clicked" if double_click else "Clicked"
-        return f"{verb} <{tag}> at ({round(x)}, {round(y)})"
+        await page.raw.mouse.move(x, y)
+        return f"Hovered <{tag}> at ({round(x)}, {round(y)})"

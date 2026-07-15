@@ -1,23 +1,30 @@
 from __future__ import annotations
 
-from fastmcp import Context, FastMCP  # noqa: TC002
+from typing import TYPE_CHECKING
 
-from camoufox_mcp.tools._context import get_page
+from camoufox_mcp.tools._base import get_page, get_session, tool
+
+if TYPE_CHECKING:
+    from fastmcp import FastMCP
+
+    from camoufox_mcp.tools._base import ToolDeps
 
 
-def register(mcp: FastMCP) -> None:
-    @mcp.tool()
-    async def press_key(key: str, ctx: Context) -> str:
-        """Press a keyboard key or key combination.
+def register(mcp: FastMCP, deps: ToolDeps) -> None:
+    @tool(mcp, deps)
+    async def press_key(profile: str, key: str) -> str:
+        """Press a single key or key combination on the focused element.
 
-        Args:
-            key: Key name. Examples: 'Enter', 'Tab', 'Escape', 'ArrowDown',
-                 'Backspace', 'a'. For combinations: 'Control+a',
-                 'Shift+Enter', 'Alt+Tab'.
+        Uses Playwright key names. Examples: ``Enter``, ``Escape``, ``Tab``,
+        ``ArrowDown``, ``Backspace``, ``Control+A``, ``Shift+Tab``.
+
+        Parameters:
+        - profile: session/profile name.
+        - key: the key or ``Modifier+Key`` combination to press.
+
+        Returns a confirmation like ``Pressed Enter``.
         """
-        try:
-            page = get_page(ctx)
-            await page.dispatch_key(key)
-            return f"Pressed: {key}"
-        except Exception as e:
-            return f"Error: {type(e).__name__}: {e}"
+        session = await get_session(deps, profile)
+        page = get_page(session)
+        await page.raw.keyboard.press(key)
+        return f"Pressed {key}"
