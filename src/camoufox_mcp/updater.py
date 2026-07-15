@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import io
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,38 +13,83 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_CHECK_INTERVAL_S = 24 * 3600
+_STAMP_NAME = ".update_check"
+
 
 class BrowserSetupError(RuntimeError):
     """Raised when no usable Camoufox binary is available and it cannot be fetched."""
 
 
-async def ensure_browser_ready(config: ServerConfig) -> None:
-    """Fail-open startup update of the Camoufox binary and GeoIP database.
+async def ensure_browser_present(config: ServerConfig) -> None:
+    """Guarantee a usable Camoufox binary exists, blocking only on a cold install.
 
-    Honors ``CAMOUFOX_AUTO_UPDATE=false``. On update failure the server still
-    starts if a local binary exists (a warning is logged); it hard-fails only
-    when no local binary is present at all.
+    This is on the startup critical path, so it never performs the (slow, network)
+    version check: if a local binary already exists it returns immediately. Only the
+    very first install — when no binary is present at all — blocks to download one.
+    Honors ``CAMOUFOX_AUTO_UPDATE=false`` (then a missing binary is a hard error).
     """
-    if not config.auto_update:
-        if not _binary_present(config):
-            raise BrowserSetupError(
-                "No local Camoufox binary found and auto-update is disabled "
-                "(CAMOUFOX_AUTO_UPDATE=false). Run `camoufox fetch` first."
-            )
-        logger.info("Auto-update disabled; using local Camoufox binary.")
+    if _binary_present(config):
         return
-
+    if not config.auto_update:
+        raise BrowserSetupError(
+            "No local Camoufox binary found and auto-update is disabled "
+            "(CAMOUFOX_AUTO_UPDATE=false). Run `camoufox fetch` first."
+        )
     try:
         await asyncio.to_thread(_update_browser)
         await asyncio.to_thread(_update_geoip)
-        logger.info("Camoufox binary and GeoIP database are up to date.")
     except Exception as exc:
-        if _binary_present(config):
-            logger.warning("Camoufox auto-update failed; continuing with local binary: %s", exc)
-            return
         raise BrowserSetupError(
-            f"Camoufox auto-update failed and no local binary is present: {exc}"
+            f"Camoufox download failed and no local binary is present: {exc}"
         ) from exc
+    _write_stamp(config)
+
+
+def schedule_refresh(config: ServerConfig) -> asyncio.Task[None] | None:
+    """Start a background binary + GeoIP refresh if one is due, else return ``None``.
+
+    Throttled to at most once per ``_CHECK_INTERVAL_S`` (a timestamp file records the
+    last successful check), so concurrent server starts don't each pay the version
+    check. The refresh runs off the startup critical path, so the server is ready
+    immediately; the caller owns the returned task and should cancel it on shutdown.
+    """
+    if not config.auto_update or not _is_due(config):
+        return None
+    return asyncio.create_task(_refresh(config))
+
+
+async def _refresh(config: ServerConfig) -> None:
+    try:
+        await asyncio.to_thread(_update_browser)
+        await asyncio.to_thread(_update_geoip)
+        _write_stamp(config)
+        logger.info("Camoufox binary and GeoIP database refreshed in background.")
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning("Background Camoufox refresh failed; keeping local binary: %s", exc)
+
+
+def _stamp_path(config: ServerConfig) -> Path:
+    return config.data_dir / _STAMP_NAME
+
+
+def _is_due(config: ServerConfig) -> bool:
+    try:
+        age = time.time() - _stamp_path(config).stat().st_mtime
+    except OSError:
+        return True
+    return age > _CHECK_INTERVAL_S
+
+
+def _write_stamp(config: ServerConfig) -> None:
+    stamp = _stamp_path(config)
+    try:
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(str(time.time()), encoding="utf-8")
+    except OSError:
+        logger.debug("Could not write update stamp", exc_info=True)
 
 
 def _binary_present(config: ServerConfig) -> bool:

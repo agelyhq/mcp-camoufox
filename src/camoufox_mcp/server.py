@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -12,7 +14,7 @@ from camoufox_mcp.sessions import SessionManager
 from camoufox_mcp.telemetry import TelemetryLogger
 from camoufox_mcp.tools import register_all_tools
 from camoufox_mcp.tools._base import ToolDeps
-from camoufox_mcp.updater import ensure_browser_ready
+from camoufox_mcp.updater import ensure_browser_present, schedule_refresh
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -43,10 +45,15 @@ def build_server(config: ServerConfig) -> FastMCP:
 
     @asynccontextmanager
     async def lifespan(_server: FastMCP) -> AsyncIterator[dict[str, object]]:
-        await ensure_browser_ready(config)
+        await ensure_browser_present(config)
+        refresh = schedule_refresh(config)
         try:
             yield {"config": config, "sessions": sessions, "telemetry": telemetry}
         finally:
+            if refresh is not None:
+                refresh.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await refresh
             await sessions.shutdown()
 
     mcp = FastMCP(name="Camoufox Browser", instructions=_INSTRUCTIONS, lifespan=lifespan)
