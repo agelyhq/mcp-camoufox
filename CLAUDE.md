@@ -17,7 +17,7 @@ src/camoufox_mcp/
   server.py     # composition root: FastMCP instance, lifespan, auto-update, run stdio
   config.py     # ONLY place reading os.environ; frozen ServerConfig
   session_defaults.py  # frozen SessionDefaults dataclass (per-session creation options)
-  updater.py    # fail-open auto-update (browser binary + GeoIP) via camoufox programmatic API
+  updater.py    # throttled, non-blocking fail-open auto-update (browser binary + GeoIP)
   telemetry.py  # per-profile JSONL usage logger
   sessions/     # SessionManager, Session, launch kwargs, PageBook, Page wrapper, monitors
   dom/          # UID snapshot system + JS injection (evaluated via Page.evaluate)
@@ -75,9 +75,13 @@ Dependencies point inward: `tools/` → `sessions/` + `dom/` → `config.py`.
   `set_input_files`, `select_option`, `wait_for_selector`, `goto`, history nav).
 - `dom/` functions take any object satisfying `EvaluatablePage` (`.evaluate`) —
   they must not import `sessions/` types directly.
-- Startup auto-update is fail-open: if the browser binary is stale but update
-  fails, start anyway with a local binary if one exists; hard-fail only if none
-  exists at all.
+- Startup auto-update is fail-open AND non-blocking: `ensure_browser_present`
+  only blocks on a cold install (no binary at all); the version check + refresh
+  run in a background task, throttled to once per 24h via a stamp file. So
+  concurrent server starts never stall on the GitHub check.
+- `CAMOUFOX_HEADLESS` unset defaults to a visible window, which needs a working
+  desktop GL stack; `virtual` (Xvfb) is the reliable invisible mode and what the
+  E2E suite exercises alongside `true`.
 
 ## Build / lint / test
 

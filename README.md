@@ -37,7 +37,7 @@ src/camoufox_mcp/
   server.py     # composition root: FastMCP instance, lifespan, auto-update, run stdio
   config.py     # only place reading os.environ; frozen ServerConfig
   session_defaults.py  # frozen SessionDefaults dataclass (per-session creation options)
-  updater.py    # fail-open auto-update (browser binary + GeoIP) via camoufox's own API
+  updater.py    # throttled, non-blocking fail-open auto-update (browser binary + GeoIP)
   telemetry.py  # per-profile JSONL usage logger
   sessions/     # SessionManager, Session, launch kwargs, PageBook, Page wrapper, monitors
   dom/          # UID snapshot system + JS injection (accessibility-tree based targeting)
@@ -158,7 +158,7 @@ CDP/V8-only capabilities with no Firefox equivalent:
 
 | Var | Default | Meaning |
 |---|---|---|
-| `CAMOUFOX_HEADLESS` | unset → visible window | `true` (headless) / `virtual` (Xvfb, Linux only) / `false` (visible) |
+| `CAMOUFOX_HEADLESS` | unset → visible window | `true` (headless) / `virtual` (Xvfb, Linux only) / `false` (visible). A visible window needs a working desktop GL stack; when in doubt use `virtual` (invisible, best anti-detection). |
 | `CAMOUFOX_PROXY` | (none) | `http://user:pass@host:port` — parsed into a Playwright proxy dict; forces `geoip=True` |
 | `CAMOUFOX_DATA_DIR` | `platformdirs.user_data_dir("camoufox-mcp")` | Base directory for profiles + logs |
 | `CAMOUFOX_FINGERPRINT_OS` | random | Default fingerprint OS: `windows` / `linux` / `macos` |
