@@ -5,6 +5,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+from weakref import WeakKeyDictionary
 
 if TYPE_CHECKING:
     from playwright.async_api import Page, Request, Response
@@ -14,8 +15,19 @@ logger = logging.getLogger(__name__)
 MAX_ENTRIES = 1000
 
 
-@dataclass
+def format_status(status: int | None) -> str:
+    """Render a captured request status: ``pending`` (no response), ``failed`` (errored), else the code."""
+    if status is None:
+        return "pending"
+    if status == 0:
+        return "failed"
+    return str(status)
+
+
+@dataclass(eq=False)
 class NetworkEntry:
+    """Pure DTO describing one captured HTTP request; holds no live Playwright objects."""
+
     reqid: int
     method: str
     url: str
@@ -25,7 +37,6 @@ class NetworkEntry:
     status: int | None = None
     response_headers: dict[str, str] | None = None
     timestamp: float = field(default_factory=time.time)
-    _response_ref: Any = field(default=None, repr=False)
 
 
 class NetworkMonitor:
@@ -33,7 +44,12 @@ class NetworkMonitor:
         self._entries: deque[NetworkEntry] = deque(maxlen=MAX_ENTRIES)
         self._preserved: deque[NetworkEntry] = deque(maxlen=MAX_ENTRIES)
         self._next_reqid: int = 0
-        self._pending: dict[int, NetworkEntry] = {}
+        # Keyed by the Playwright Request object itself: identity is stable across the
+        # request/response/requestfailed events, so the correct entry is always mutated.
+        self._pending: dict[Request, NetworkEntry] = {}
+        # Response objects live here, not on the DTO. Weak keys drop the response as
+        # soon as its entry is evicted from the deques and garbage-collected.
+        self._responses: WeakKeyDictionary[NetworkEntry, Response] = WeakKeyDictionary()
 
     def attach(self, page: Page) -> None:
         page.on("request", self._on_request)
@@ -61,18 +77,18 @@ class NetworkMonitor:
             post_data=request.post_data,
         )
         self._entries.append(entry)
-        self._pending[id(request)] = entry
+        self._pending[request] = entry
 
     def _on_response(self, response: Response) -> None:
-        entry = self._pending.pop(id(response.request), None)
+        entry = self._pending.pop(response.request, None)
         if entry is None:
             return
         entry.status = response.status
         entry.response_headers = dict(response.headers)
-        entry._response_ref = response
+        self._responses[entry] = response
 
     def _on_request_failed(self, request: Request) -> None:
-        entry = self._pending.pop(id(request), None)
+        entry = self._pending.pop(request, None)
         if entry is None:
             return
         entry.status = 0
@@ -111,11 +127,11 @@ class NetworkMonitor:
         return None
 
     async def get_response_body(self, entry: NetworkEntry, max_size: int = 50000) -> str | None:
-        ref = entry._response_ref
-        if ref is None:
+        response = self._responses.get(entry)
+        if response is None:
             return None
         try:
-            body = await ref.text()
+            body = await response.text()
         except Exception:
             logger.debug("Failed to read response body for reqid=%d", entry.reqid, exc_info=True)
             return None

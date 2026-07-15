@@ -11,10 +11,6 @@ from urllib.request import urlretrieve
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ADDON_URLS: tuple[str, ...] = (
-    "https://addons.mozilla.org/firefox/downloads/latest/istilldontcareaboutcookies/latest.xpi",
-)
-
 _DEFAULT_CACHE_DIR = Path.home() / ".cache" / "camoufox-mcp" / "addons"
 
 
