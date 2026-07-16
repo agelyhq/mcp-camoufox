@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Get HTML Test{% endblock %}
+{% block content %}
+<h1 id="page-title">Get HTML Test</h1>
+<article id="main-article" data-kind="content">
+  <p id="lead">The quick brown fox jumps over the lazy dog.</p>
+  <p class="filler">ALPHA BETA GAMMA DELTA EPSILON ZETA ETA THETA IOTA KAPPA.</p>
+</article>
+<div id="sidebar">
+  <span class="tag">sidebar-only-text</span>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.__getHtmlMarker = "SCRIPT_MARKER_SHOULD_BE_STRIPPED";
+</script>
+{% endblock %}

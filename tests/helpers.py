@@ -4,9 +4,40 @@ import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
     from fastmcp import Client
 
 PROFILE = "test"
+
+# Optional per-session CAMOUFOX_* vars an ambient environment might set; cleared so a
+# test's config is derived only from the values isolate_camoufox_env sets explicitly.
+_OPTIONAL_ENV_VARS = (
+    "CAMOUFOX_PROXY",
+    "CAMOUFOX_FINGERPRINT_OS",
+    "CAMOUFOX_VIEWPORT",
+    "CAMOUFOX_LOCALE",
+)
+
+
+def isolate_camoufox_env(monkeypatch: pytest.MonkeyPatch, data_dir: Path, **overrides: str) -> None:
+    """Point config at an isolated ``data_dir`` and clear inherited CAMOUFOX_* vars.
+
+    Applies headless=true / auto_update=false defaults plus the data dir, then any
+    ``overrides`` (full env var names, e.g. ``CAMOUFOX_HEADLESS="virtual"``), and
+    finally deletes the optional per-session vars so the host environment never leaks.
+    """
+    env = {
+        "CAMOUFOX_HEADLESS": "true",
+        "CAMOUFOX_AUTO_UPDATE": "false",
+        "CAMOUFOX_DATA_DIR": str(data_dir),
+        **overrides,
+    }
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    for var in _OPTIONAL_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
 
 
 def extract_uid(snapshot: str, label: str) -> str:

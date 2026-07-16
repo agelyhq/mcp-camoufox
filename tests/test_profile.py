@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from fastmcp import Client
 
-from tests.helpers import tool_text
+from tests.helpers import evaluate
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -15,7 +15,7 @@ COOKIE_JS = "document.getElementById('session-id').textContent"
 async def _session_id(client: Client, url: str, profile: str) -> str:
     """Navigate with a profile and return the persisted session-id value."""
     await client.call_tool("navigate", {"url": url, "profile": profile})
-    return tool_text(await client.call_tool("evaluate", {"profile": profile, "script": COOKIE_JS}))
+    return await evaluate(client, profile, COOKIE_JS)
 
 
 async def test_profile_persistence(mcp_server: FastMCP, flask_server: str) -> None:

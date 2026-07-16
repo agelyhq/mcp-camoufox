@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from fastmcp import Client
 
-from tests.helpers import tool_text
+from tests.helpers import evaluate, tool_text
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -19,26 +19,22 @@ SET_STATE_JS = (
 )
 
 
-async def _eval(client: Client, profile: str, script: str) -> str:
-    return tool_text(await client.call_tool("evaluate", {"profile": profile, "script": script}))
-
-
 async def test_two_profiles_are_isolated(client: Client, flask_server: str) -> None:
     """State written in profile A must be invisible to a concurrent profile B."""
     url = f"{flask_server}/"
 
     await client.call_tool("navigate", {"url": url, "profile": PROFILE_A})
-    written = await _eval(client, PROFILE_A, SET_STATE_JS)
+    written = await evaluate(client, PROFILE_A, SET_STATE_JS)
     assert "A-value" in written
 
     await client.call_tool("navigate", {"url": url, "profile": PROFILE_B})
-    b_local = await _eval(client, PROFILE_B, "localStorage.getItem('shared')")
-    b_cookie = await _eval(client, PROFILE_B, "document.cookie")
+    b_local = await evaluate(client, PROFILE_B, "localStorage.getItem('shared')")
+    b_cookie = await evaluate(client, PROFILE_B, "document.cookie")
     assert b_local == "null", f"localStorage leaked into profile B: {b_local!r}"
     assert "cookieA" not in b_cookie, f"cookie leaked into profile B: {b_cookie!r}"
 
     # Profile A must still hold its own state while B is live.
-    a_local = await _eval(client, PROFILE_A, "localStorage.getItem('shared')")
+    a_local = await evaluate(client, PROFILE_A, "localStorage.getItem('shared')")
     assert "A-value" in a_local
 
 
@@ -71,7 +67,7 @@ async def test_close_then_reopen_reuses_cookies(mcp_server: FastMCP, flask_serve
 
     async with Client(mcp_server) as c:
         await c.call_tool("navigate", {"url": url, "profile": profile})
-        await _eval(
+        await evaluate(
             c,
             profile,
             "document.cookie = 'pc=persist42; path=/; max-age=31536000'; document.cookie",
@@ -79,6 +75,6 @@ async def test_close_then_reopen_reuses_cookies(mcp_server: FastMCP, flask_serve
         await c.call_tool("close_session", {"profile": profile})
 
         await c.call_tool("navigate", {"url": url, "profile": profile})
-        cookie = await _eval(c, profile, "document.cookie")
+        cookie = await evaluate(c, profile, "document.cookie")
 
     assert "persist42" in cookie, f"cookie not persisted across restart: {cookie!r}"

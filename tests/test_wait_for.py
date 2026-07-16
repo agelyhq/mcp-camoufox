@@ -72,3 +72,66 @@ async def test_wait_for_invalid_condition(client: Client, flask_server: str) -> 
         await client.call_tool("wait_for", {"profile": PROFILE, "condition": "bogus"})
     )
     assert "error" in result.lower()
+
+
+async def test_wait_for_predicate(client: Client, flask_server: str) -> None:
+    await client.call_tool("navigate", {"url": f"{flask_server}/wait-for", "profile": PROFILE})
+
+    result = tool_text(
+        await client.call_tool(
+            "wait_for",
+            {
+                "profile": PROFILE,
+                "condition": "predicate",
+                "expression": "document.querySelector('#delayed-3s') !== null",
+                "timeout": 10000,
+            },
+        )
+    )
+    assert "condition met" in result.lower()
+    assert "predicate" in result.lower()
+
+
+async def test_wait_for_predicate_with_return(client: Client, flask_server: str) -> None:
+    await client.call_tool("navigate", {"url": f"{flask_server}/wait-for", "profile": PROFILE})
+
+    result = tool_text(
+        await client.call_tool(
+            "wait_for",
+            {
+                "profile": PROFILE,
+                "condition": "predicate",
+                "expression": "!!document.getElementById('delayed-3s')",
+                "return_expression": "document.getElementById('delayed-3s').textContent",
+                "timeout": 10000,
+            },
+        )
+    )
+    assert "condition met" in result.lower()
+    assert "3 seconds" in result
+
+
+async def test_wait_for_predicate_missing_expression(client: Client, flask_server: str) -> None:
+    await client.call_tool("navigate", {"url": f"{flask_server}/wait-for", "profile": PROFILE})
+
+    result = tool_text(
+        await client.call_tool("wait_for", {"profile": PROFILE, "condition": "predicate"})
+    )
+    assert "error" in result.lower()
+
+
+async def test_wait_for_predicate_timeout(client: Client, flask_server: str) -> None:
+    await client.call_tool("navigate", {"url": f"{flask_server}/wait-for", "profile": PROFILE})
+
+    result = tool_text(
+        await client.call_tool(
+            "wait_for",
+            {
+                "profile": PROFILE,
+                "condition": "predicate",
+                "expression": "!!document.getElementById('never-exists')",
+                "timeout": 1000,
+            },
+        )
+    )
+    assert "timeout" in result.lower() or "error" in result.lower()

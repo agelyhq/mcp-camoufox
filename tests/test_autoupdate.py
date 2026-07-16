@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tests.helpers import isolate_camoufox_env
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -9,9 +11,7 @@ if TYPE_CHECKING:
 
 
 def _config(data_dir: Path, monkeypatch: pytest.MonkeyPatch, *, auto_update: str) -> object:
-    monkeypatch.setenv("CAMOUFOX_DATA_DIR", str(data_dir))
-    monkeypatch.setenv("CAMOUFOX_HEADLESS", "true")
-    monkeypatch.setenv("CAMOUFOX_AUTO_UPDATE", auto_update)
+    isolate_camoufox_env(monkeypatch, data_dir, CAMOUFOX_AUTO_UPDATE=auto_update)
     from camoufox_mcp.config import ServerConfig
 
     return ServerConfig.from_env()

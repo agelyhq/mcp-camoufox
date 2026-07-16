@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 import urllib.request
@@ -8,13 +9,17 @@ from typing import TYPE_CHECKING
 import pytest
 from fastmcp import Client
 
+from tests.helpers import isolate_camoufox_env
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
     from pathlib import Path
 
     from fastmcp import FastMCP
 
-FLASK_URL = "http://127.0.0.1:5123"
+# TEST_FLASK_PORT lets parallel pytest invocations avoid binding the same port.
+FLASK_PORT = int(os.environ.get("TEST_FLASK_PORT", "5123"))
+FLASK_URL = f"http://127.0.0.1:{FLASK_PORT}"
 
 
 @pytest.fixture(scope="session")
@@ -23,7 +28,7 @@ def flask_server() -> Iterator[str]:
     from tests.server import app
 
     server = threading.Thread(
-        target=lambda: app.run(host="127.0.0.1", port=5123, use_reloader=False),
+        target=lambda: app.run(host="127.0.0.1", port=FLASK_PORT, use_reloader=False),
         daemon=True,
     )
     server.start()
@@ -52,16 +57,10 @@ def mcp_server(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> FastMCP:
     asyncio primitives never leak across pytest's per-test event loops, and so each
     test gets a clean profile/telemetry directory.
     """
-    monkeypatch.setenv("CAMOUFOX_HEADLESS", "true")
-    monkeypatch.setenv("CAMOUFOX_AUTO_UPDATE", "false")
-    monkeypatch.setenv("CAMOUFOX_DATA_DIR", str(data_dir))
-    monkeypatch.delenv("CAMOUFOX_PROXY", raising=False)
-    monkeypatch.delenv("CAMOUFOX_FINGERPRINT_OS", raising=False)
-    monkeypatch.delenv("CAMOUFOX_VIEWPORT", raising=False)
-    monkeypatch.delenv("CAMOUFOX_LOCALE", raising=False)
+    isolate_camoufox_env(monkeypatch, data_dir)
 
+    from camoufox_mcp.bootstrap import build_server
     from camoufox_mcp.config import ServerConfig
-    from camoufox_mcp.server import build_server
 
     return build_server(ServerConfig.from_env())
 

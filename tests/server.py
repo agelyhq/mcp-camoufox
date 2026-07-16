@@ -119,6 +119,11 @@ def click_at_page():
     return render_template("click_at.html")
 
 
+@app.route("/get-html")
+def get_html_page():
+    return render_template("get_html.html")
+
+
 # ---------------------------------------------------------------------------
 # API endpoints (for AJAX / network testing)
 # ---------------------------------------------------------------------------
