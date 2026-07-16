@@ -9,6 +9,8 @@ if TYPE_CHECKING:
 
     from camoufox_mcp.tools._base import ToolDeps
 
+_VALID_ACTIONS = ("accept", "dismiss")
+
 
 def register(mcp: FastMCP, deps: ToolDeps) -> None:
     @tool(mcp, deps)
@@ -30,8 +32,8 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
         - ``Error: ValueError: action must be 'accept' or 'dismiss'``.
         - ``Error: RuntimeError: No dialog is pending`` when nothing is waiting.
         """
-        if action not in ("accept", "dismiss"):
-            raise ValueError("action must be 'accept' or 'dismiss'")
+        if action not in _VALID_ACTIONS:
+            raise ValueError(f"action must be {' or '.join(map(repr, _VALID_ACTIONS))}")
         session = await get_session(deps, profile)
         page = get_page(session)
         await page.respond_to_dialog(action, prompt_text)
