@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import logging
-import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from weakref import WeakKeyDictionary
 
@@ -36,7 +35,6 @@ class NetworkEntry:
     post_data: str | None
     status: int | None = None
     response_headers: dict[str, str] | None = None
-    timestamp: float = field(default_factory=time.time)
 
 
 class NetworkMonitor:

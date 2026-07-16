@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -18,7 +17,6 @@ class ConsoleEntry:
     text: str
     url: str
     line_number: int
-    timestamp: float = field(default_factory=time.time)
 
 
 class ConsoleMonitor:
