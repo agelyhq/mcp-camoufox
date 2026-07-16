@@ -21,6 +21,14 @@ async def scroll_into_view(page: EvaluatablePage, uid: str) -> dict[str, object]
     return await run_js_action(page, uid, get_scroll_into_view_js)
 
 
+async def resolve_center(page: EvaluatablePage, uid: str) -> tuple[float, float, str]:
+    """Resolve a uid, scroll it into view, re-resolve, and return its ``(x, y, tag)`` center."""
+    await resolve_uid_or_raise(page, uid)
+    await scroll_into_view(page, uid)
+    info = await resolve_uid_or_raise(page, uid)
+    return info["x"], info["y"], str(info.get("tag", "?"))
+
+
 async def file_input_selector(page: EvaluatablePage, uid: str) -> dict[str, object]:
     return await run_js_action(page, uid, get_file_input_selector_js)
 

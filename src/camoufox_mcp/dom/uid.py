@@ -46,13 +46,3 @@ async def resolve_uid_or_raise(page: EvaluatablePage, uid: str) -> dict[str, obj
     if "error" in info:
         raise ValueError(f"unknown or stale uid '{uid}'; take a new snapshot")
     return info
-
-
-async def resolve_center(page: EvaluatablePage, uid: str) -> tuple[float, float, str]:
-    """Resolve a uid, scroll it into view, re-resolve, and return its ``(x, y, tag)`` center."""
-    from camoufox_mcp.dom.actions import scroll_into_view
-
-    await resolve_uid_or_raise(page, uid)
-    await scroll_into_view(page, uid)
-    info = await resolve_uid_or_raise(page, uid)
-    return info["x"], info["y"], str(info.get("tag", "?"))
