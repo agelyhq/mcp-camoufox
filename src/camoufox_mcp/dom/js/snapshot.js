@@ -1,7 +1,9 @@
-(() => {
+((opts) => {
   document.querySelectorAll('[data-mcp-uid]').forEach(el => el.removeAttribute('data-mcp-uid'));
 
-  let uidCounter = 0;
+  const maxNodes = (typeof opts.maxNodes === 'number' && opts.maxNodes > 0) ? opts.maxNodes : Infinity;
+  const interactiveOnly = opts.interactiveOnly === true;
+
   const INTERACTIVE_TAGS = new Set([
     'A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'DETAILS', 'SUMMARY'
   ]);
@@ -102,47 +104,70 @@
     return text.trim().replace(/\s+/g, ' ').slice(0, 80);
   }
 
+  // Pre-order walk collecting one record per included node WITHOUT assigning
+  // uids yet. Returns { records, hasInteractive } so a parent can learn whether
+  // its subtree holds any interactive element (used by interactive_only).
   function walk(el, depth) {
-    const lines = [];
-    if (el.nodeType !== 1) return lines;
-    if (SKIP_TAGS.has(el.tagName)) return lines;
-    if (!isVisible(el)) return lines;
-
+    if (el.nodeType !== 1 || SKIP_TAGS.has(el.tagName) || !isVisible(el)) {
+      return { records: [], hasInteractive: false };
+    }
     const included = shouldInclude(el);
-    let uid = '';
+    const interactive = included && isInteractive(el);
+    const childDepth = included ? depth + 1 : depth;
 
-    if (included && isInteractive(el)) {
-      uid = 'e' + uidCounter++;
-      el.setAttribute('data-mcp-uid', uid);
-    }
-
-    if (included) {
-      const indent = '  '.repeat(depth);
-      const label = getLabel(el);
-      const attrs = getAttributes(el);
-      const text = getTextContent(el);
-
-      let line = indent + '[' + label + (uid ? ' ' + uid : '') + (el.disabled ? ' disabled' : '') + ']';
-      if (text) line += ' ' + text;
-      if (attrs) line += ' ' + attrs;
-
-      lines.push(line);
-    }
-
+    const childRecords = [];
+    let childHasInteractive = false;
     for (const child of el.children) {
-      lines.push(...walk(child, included ? depth + 1 : depth));
+      const r = walk(child, childDepth);
+      for (const rec of r.records) childRecords.push(rec);
+      if (r.hasInteractive) childHasInteractive = true;
     }
 
-    return lines;
+    const records = [];
+    if (included) {
+      records.push({ el, depth, interactive, hasInteractiveDescendant: childHasInteractive });
+    }
+    for (const rec of childRecords) records.push(rec);
+    return { records, hasInteractive: interactive || childHasInteractive };
   }
 
+  function render(rec, uid) {
+    const el = rec.el;
+    const indent = '  '.repeat(rec.depth);
+    const label = getLabel(el);
+    const attrs = getAttributes(el);
+    const text = getTextContent(el);
+    let line = indent + '[' + label + (uid ? ' ' + uid : '') + (el.disabled ? ' disabled' : '') + ']';
+    if (text) line += ' ' + text;
+    if (attrs) line += ' ' + attrs;
+    return line;
+  }
+
+  let records = walk(document.body, 1).records;
+  if (interactiveOnly) {
+    records = records.filter(rec => rec.interactive || rec.hasInteractiveDescendant);
+  }
+  const totalNodes = records.length;
+  const shown = records.length > maxNodes ? records.slice(0, maxNodes) : records;
+
+  let uidCounter = 0;
   const title = document.title || '';
   const url = location.href;
   const lines = ['[page] ' + title + ' | ' + url];
-  lines.push(...walk(document.body, 1));
+  for (const rec of shown) {
+    let uid = '';
+    if (rec.interactive) {
+      uid = 'e' + uidCounter++;
+      rec.el.setAttribute('data-mcp-uid', uid);
+    }
+    lines.push(render(rec, uid));
+  }
 
   return {
     tree: lines.join('\n'),
     uidCount: uidCounter,
+    totalNodes,
+    shownNodes: shown.length,
+    truncated: totalNodes > shown.length,
   };
-})();
+})

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from camoufox_mcp.dom import get_snapshot_js
+from camoufox_mcp.dom import capture_snapshot
 from camoufox_mcp.tools._base import get_page, get_session, tool
 
 if TYPE_CHECKING:
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 def register(mcp: FastMCP, deps: ToolDeps) -> None:
     @tool(mcp, deps)
-    async def snapshot(profile: str) -> str:
+    async def snapshot(profile: str, max_nodes: int = 1500, interactive_only: bool = False) -> str:
         """Capture an accessibility/UID text tree of the active tab.
 
         This is the primary primitive for driving a page: it walks the visible,
@@ -29,6 +29,16 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
         Params:
             profile: The browser profile whose active tab is snapshotted. The
                 profile is launched lazily on first use.
+            max_nodes: Cap on how many DOM nodes are rendered (default 1500). When
+                the page has more, whole trailing nodes/subtrees are dropped (never
+                a partial line) and a "[truncated: N more nodes ...]" note is
+                appended; kept nodes keep the exact uids they would have uncapped.
+                Raise it for a fuller tree, or set it to 0 to disable the cap.
+            interactive_only: When true, render only interactive elements plus the
+                minimal ancestor context that keeps the tree readable (structural
+                leaves with no interactive descendant are dropped). Off by default
+                because structural nodes are load-bearing for picking the right
+                uid; turn it on to shrink large pages while keeping every uid.
 
         Returns:
             An indented text tree of interactive elements, each annotated with its
@@ -42,7 +52,4 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
         """
         session = await get_session(deps, profile)
         page = get_page(session)
-        result = await page.evaluate(get_snapshot_js())
-        if isinstance(result, dict):
-            return str(result.get("tree", result))
-        return str(result)
+        return await capture_snapshot(page, max_nodes=max_nodes, interactive_only=interactive_only)
