@@ -26,6 +26,7 @@ dev = [
 
 [project.scripts]
 camoufox-mcp = "camoufox_mcp.server:main"
+camoufox-mcp-daemon = "camoufox_mcp.daemon.main:main"
 
 [build-system]
 requires = ["hatchling"]
