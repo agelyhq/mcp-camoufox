@@ -19,9 +19,11 @@ def build_launch_kwargs(
 
     Always-on: ``humanize=True``, ``persistent_context=True``. ``geoip`` is forced
     ``True`` whenever a proxy is configured (Camoufox leaks a warning otherwise).
+    ``headless`` uses the per-session override when supplied, else the server-wide
+    ``config.headless`` default.
     """
     kwargs: dict[str, Any] = {
-        "headless": config.headless,
+        "headless": config.headless if opts.headless is None else opts.headless,
         "humanize": True,
         "persistent_context": True,
         "user_data_dir": str(user_data_dir),
