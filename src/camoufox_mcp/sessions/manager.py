@@ -9,9 +9,11 @@ from filelock import FileLock, Timeout
 from camoufox_mcp.sessions.errors import ProfileInUseError
 from camoufox_mcp.sessions.init_options import SessionInitOptions
 from camoufox_mcp.sessions.session import Session
+from camoufox_mcp.telemetry import UsageRecord, now_iso
 
 if TYPE_CHECKING:
     from camoufox_mcp.config import ServerConfig
+    from camoufox_mcp.telemetry import TelemetryLogger
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +21,9 @@ logger = logging.getLogger(__name__)
 class SessionManager:
     """Owns the live sessions keyed by profile name and their cross-process locks."""
 
-    def __init__(self, config: ServerConfig) -> None:
+    def __init__(self, config: ServerConfig, telemetry: TelemetryLogger | None = None) -> None:
         self._config = config
+        self._telemetry = telemetry
         self._sessions: dict[str, Session] = {}
         self._locks: dict[str, FileLock] = {}
         self._create_lock = asyncio.Lock()
@@ -29,9 +32,9 @@ class SessionManager:
         """Return the active session for ``profile`` or lazily create one.
 
         ``overrides`` (fingerprint_os, viewport_width, viewport_height, locale,
-        block_images, block_webrtc) are applied only at creation time and ignored
-        when the profile is already active. Raises :class:`ProfileInUseError` if the
-        profile is locked by another OS process.
+        block_images, block_webrtc, headless) are applied only at creation time and
+        ignored when the profile is already active. Raises :class:`ProfileInUseError`
+        if the profile is locked by another OS process.
         """
         existing = self._sessions.get(profile)
         if existing is not None:
@@ -60,6 +63,10 @@ class SessionManager:
     def list_sessions(self) -> list[Session]:
         return list(self._sessions.values())
 
+    def active_count(self) -> int:
+        """Number of live sessions — used by the daemon /health route and TTL watchdog."""
+        return len(self._sessions)
+
     async def close_session(self, profile: str) -> None:
         """Close the browser for ``profile`` and release its lock. Idempotent.
 
@@ -78,9 +85,31 @@ class SessionManager:
                 await self.close_session(profile)
             except Exception:
                 logger.warning("Failed to close session %s during shutdown", profile, exc_info=True)
+            else:
+                self._log_session_closed(profile)
+
+    def _log_session_closed(self, profile: str) -> None:
+        """Emit a best-effort lifecycle record for a profile closed at shutdown."""
+        if self._telemetry is None:
+            return
+        try:
+            self._telemetry.log(
+                UsageRecord(
+                    ts=now_iso(),
+                    profile=profile,
+                    tool="session_closed",
+                    args={"reason": "shutdown"},
+                    duration_ms=0.0,
+                    ok=True,
+                    error=None,
+                    result=None,
+                )
+            )
+        except Exception:
+            logger.debug("session_closed telemetry failed for %s", profile, exc_info=True)
 
     def _acquire_lock(self, profile: str) -> FileLock:
-        self._config.profiles_dir.mkdir(parents=True, exist_ok=True)
+        self._config.ensure_profiles_dir()
         lock = FileLock(str(self._config.profiles_dir / f"{profile}.lock"))
         try:
             lock.acquire(timeout=0)

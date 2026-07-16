@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from playwright.async_api import TimeoutError as _PlaywrightTimeoutError
+
+# Re-exported so the tools layer can detect Playwright timeouts without importing
+# playwright itself (tools -> sessions is the allowed dependency direction).
+PLAYWRIGHT_TIMEOUT_ERROR: type[BaseException] = _PlaywrightTimeoutError
+
 
 class ProfileInUseError(RuntimeError):
     """A profile is already locked by another OS process."""
