@@ -5,9 +5,15 @@ description = "MCP server for Camoufox anti-detect browser"
 requires-python = ">=3.12"
 dependencies = [
     "fastmcp>=3.4.4",
-    "camoufox[geoip]>=0.4.11",
+    # camoufox and playwright are bounded together: an unbounded (transitive)
+    # playwright once drifted ahead of the installed Camoufox binary's Juggler
+    # protocol schema and every launch failed with a Browser.setDefaultViewport
+    # protocol error (TODO item 14, 2026-07-15 production incident).
+    "camoufox[geoip]>=0.4.11,<0.5",
+    "playwright>=1.58,<1.59",
     "platformdirs>=4.0",
     "filelock>=3.13",
+    "pillow>=10.0",
 ]
 
 [project.optional-dependencies]
