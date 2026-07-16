@@ -54,8 +54,7 @@ class Session:
     ) -> Session:
         from playwright.async_api import async_playwright
 
-        user_data_dir = config.profiles_dir / profile
-        user_data_dir.mkdir(parents=True, exist_ok=True)
+        user_data_dir = config.ensure_profile_dir(profile)
 
         # On first launch camoufox downloads addons/GeoIP and prints progress to
         # stdout; silence it so the stdio MCP protocol framing is never corrupted.
