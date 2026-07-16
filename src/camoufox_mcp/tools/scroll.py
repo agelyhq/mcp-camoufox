@@ -13,8 +13,8 @@ if TYPE_CHECKING:
 _DELTAS = {
     "down": (0, 1),
     "up": (0, -1),
-    "right": (1, 0),
     "left": (-1, 0),
+    "right": (1, 0),
 }
 
 
@@ -53,10 +53,13 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
             await scroll_into_view(page, uid)
             return f"Scrolled <{info.get('tag', '?')}> into view"
         if direction not in _DELTAS:
-            raise ValueError(f"invalid direction '{direction}'; use down/up/left/right")
+            raise ValueError(f"invalid direction '{direction}'; use {'/'.join(_DELTAS)}")
         dx_sign, dy_sign = _DELTAS[direction]
         if amount is None:
             axis = "innerWidth" if dx_sign else "innerHeight"
             amount = int(await page.evaluate(f"window.{axis}"))
-        await page.raw.mouse.wheel(dx_sign * amount, dy_sign * amount)
+        # ``mouse.wheel`` does not move the scroll position in headless
+        # Camoufox/Firefox; scroll via the DOM so scrollY updates and the native
+        # ``scroll`` event still fires (infinite-scroll listeners depend on it).
+        await page.evaluate(f"window.scrollBy({dx_sign * amount}, {dy_sign * amount})")
         return f"Scrolled {direction} by {amount}px"
