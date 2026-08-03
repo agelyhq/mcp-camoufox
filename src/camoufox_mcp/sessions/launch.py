@@ -11,15 +11,16 @@ if TYPE_CHECKING:
 
 _IS_LINUX = sys.platform.startswith("linux")
 
-# Camoufox decides whether `humanize` carries a max cursor-travel time with
-# `isinstance(humanize, (int, float))` — and in Python `isinstance(True, int)` is
-# True, so passing the plain bool forwards `humanize:maxTime = true` to the browser.
-# Firefox rejects it ("Value for key 'humanize:maxTime' is not a double") and the
-# humanised cursor never completes a move: `Page.dispatchMouseEvent(mousemove)` then
-# goes unanswered forever, hanging every click/hover that has to travel. Passing an
-# explicit float keeps humanisation enabled and correctly typed. 1.5s is the
-# window-traversal time Camoufox documents as typical.
-_HUMANIZE_MAX_SECONDS = 1.5
+# Humanised cursor movement is opt-in (``CAMOUFOX_HUMANIZE``, off by default): with it
+# on, Firefox intermittently stops answering the Juggler protocol part-way through a
+# ``Page.dispatchMouseEvent`` while the process stays alive, so the pending click or
+# hover never returns. Measured on the E2E suite: every run with it enabled froze at a
+# random test, every run without it completed 145/145.
+# When enabled, the value MUST reach Camoufox as a float. Camoufox decides whether
+# ``humanize`` carries a max cursor-travel time with ``isinstance(humanize, (int,
+# float))``, and Python's bool subclasses int — so a plain ``True`` forwards
+# ``humanize:maxTime = true``, which Firefox rejects outright ("Value for key
+# 'humanize:maxTime' is not a double").
 
 
 def build_launch_kwargs(
@@ -30,10 +31,10 @@ def build_launch_kwargs(
 ) -> dict[str, Any]:
     """Translate config + resolved session options into Camoufox launch kwargs.
 
-    Always-on: ``humanize=True``, ``persistent_context=True``. ``geoip`` is forced
-    ``True`` whenever a proxy is configured (Camoufox leaks a warning otherwise).
-    ``headless`` uses the per-session override when supplied, else the server-wide
-    ``config.headless`` default.
+    Always-on: ``persistent_context=True``. ``geoip`` is forced ``True`` whenever a
+    proxy is configured (Camoufox leaks a warning otherwise). ``headless`` uses the
+    per-session override when supplied, else the server-wide ``config.headless``
+    default. ``humanize`` is only sent when ``config.humanize`` is set.
     """
     headless = config.headless if opts.headless is None else opts.headless
     if headless == "virtual" and not _IS_LINUX:
@@ -43,12 +44,13 @@ def build_launch_kwargs(
         )
     kwargs: dict[str, Any] = {
         "headless": headless,
-        "humanize": _HUMANIZE_MAX_SECONDS,
         "persistent_context": True,
         "user_data_dir": str(user_data_dir),
         "block_images": opts.block_images,
         "block_webrtc": opts.block_webrtc,
     }
+    if config.humanize is not None:
+        kwargs["humanize"] = config.humanize
     if opts.fingerprint_os:
         kwargs["os"] = opts.fingerprint_os
     if opts.locale:

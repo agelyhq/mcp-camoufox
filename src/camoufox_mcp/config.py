@@ -77,6 +77,7 @@ class ServerConfig:
     camoufox_binary: str | None
     addon_urls: tuple[str, ...]
     auto_update: bool
+    humanize: float | None
     session_defaults: SessionDefaults
     daemon_enabled: bool
     daemon_ttl_seconds: int
@@ -160,10 +161,36 @@ class ServerConfig:
             camoufox_binary=os.getenv("CAMOUFOX_BINARY") or None,
             addon_urls=_parse_addons(os.getenv("CAMOUFOX_ADDON_URLS")),
             auto_update=(os.getenv("CAMOUFOX_AUTO_UPDATE", "true").lower() != "false"),
+            humanize=_parse_humanize(os.getenv("CAMOUFOX_HUMANIZE")),
             session_defaults=_parse_session_defaults(),
             daemon_enabled=(os.getenv("CAMOUFOX_DAEMON", "false").lower() == "true"),
             daemon_ttl_seconds=_parse_ttl(os.getenv("CAMOUFOX_DAEMON_TTL")),
         )
+
+
+def _parse_humanize(raw: str | None) -> float | None:
+    """Parse ``CAMOUFOX_HUMANIZE`` into a max cursor-travel time, or ``None`` when off.
+
+    Humanised cursor movement is OPT-IN because it intermittently wedges the browser:
+    Camoufox interpolates the motion inside Firefox, and the process then stops
+    answering the Juggler protocol mid-``Page.dispatchMouseEvent`` while staying
+    alive, so the pending call never returns. Measured on the E2E suite: every run
+    with humanisation on froze at a random test, while runs with it off completed
+    145/145. Set the variable to a duration in seconds (e.g. ``1.5``) to accept that
+    risk in exchange for the anti-detection benefit.
+    """
+    if raw is None or raw.strip() == "" or raw.strip().lower() in {"false", "off", "0"}:
+        return None
+    try:
+        value = float(raw.strip())
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid CAMOUFOX_HUMANIZE={raw!r}; expected a duration in seconds "
+            "(e.g. '1.5'), or 'false' to disable"
+        ) from exc
+    if value <= 0:
+        raise ValueError(f"Invalid CAMOUFOX_HUMANIZE={raw!r}; must be > 0")
+    return value
 
 
 def _parse_ttl(raw: str | None) -> int:

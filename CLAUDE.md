@@ -102,6 +102,14 @@ Dependencies point inward: `tools/` → `sessions/` + `dom/` → `config.py`.
   only blocks on a cold install (no binary at all); the version check + refresh
   run in a background task, throttled to once per 24h via a stamp file. So
   concurrent server starts never stall on the GitHub check.
+- Camoufox's humanised cursor (`humanize`) is **opt-in** via `CAMOUFOX_HUMANIZE`
+  (a duration in seconds) and off by default: with it enabled Firefox intermittently
+  stops answering the Juggler protocol mid-`Page.dispatchMouseEvent` while the process
+  stays alive, so the pending click/hover never returns and the caller hangs forever.
+  Every E2E run with it on froze at a random test; every run without it passed 145/145.
+  When it IS enabled the value must reach Camoufox as a **float** — Camoufox tests
+  `isinstance(humanize, (int, float))` and Python's bool subclasses int, so a bare
+  `True` sends `humanize:maxTime = true`, which Firefox rejects as "not a double".
 - `CAMOUFOX_HEADLESS` unset defaults to a visible window, which needs a working
   desktop GL stack; `virtual` (Xvfb) is the reliable invisible mode and what the
   E2E suite exercises alongside `true`. `virtual` is **Linux-only** — Xvfb does not

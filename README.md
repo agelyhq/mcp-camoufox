@@ -179,6 +179,7 @@ CDP/V8-only capabilities with no Firefox equivalent:
 | `CAMOUFOX_LOCALE` | Camoufox default | Default browser locale, e.g. `en-US` |
 | `CAMOUFOX_ADDON_URLS` | built-in default addons | Comma-separated override list of addon URLs |
 | `CAMOUFOX_AUTO_UPDATE` | `true` | Set `false` to disable the startup browser/GeoIP auto-update check |
+| `CAMOUFOX_HUMANIZE` | off | Max cursor-travel time in seconds (e.g. `1.5`) enabling Camoufox's humanised mouse movement. **Off by default because it intermittently wedges the browser**: Firefox stops answering the Juggler protocol part-way through a `Page.dispatchMouseEvent` while staying alive, so the pending click/hover never returns. Measured on the E2E suite — every run with it on froze at a random test, every run without it passed 145/145. Enable only if you need the anti-detection benefit and can tolerate that. |
 | `CAMOUFOX_BINARY` | Camoufox's own cache | Explicit path to a Camoufox executable |
 | `CAMOUFOX_DAEMON` | `false` | Set `true` to route the stdio entry through a shared local daemon (see below). Default path is unchanged. |
 | `CAMOUFOX_DAEMON_TTL` | `1800` | Daemon idle self-shutdown timeout in seconds (only meaningful when `CAMOUFOX_DAEMON=true`). |
