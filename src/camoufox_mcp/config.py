@@ -104,6 +104,11 @@ class ServerConfig:
         return self.daemon_dir / "daemon.sock"
 
     @property
+    def daemon_endpoint_path(self) -> Path:
+        """Windows advert file: the daemon's loopback host, port and bearer token."""
+        return self.daemon_dir / "daemon.endpoint"
+
+    @property
     def daemon_lock_path(self) -> Path:
         return self.daemon_dir / "daemon.lock"
 
@@ -134,11 +139,12 @@ class ServerConfig:
     def ensure_daemon_dir(self) -> Path:
         """Create ``<data_dir>/daemon/`` restricted to the owner, then return it.
 
-        The socket lives here so it is never world-reachable during the window
-        between uvicorn's permissive bind and ``_tighten_socket_mode``: a 0o700
-        parent gates access regardless of the socket's own mode. ``chmod`` re-runs
-        after ``mkdir`` to defeat a permissive umask on a pre-existing directory.
-        Called by both the daemon (before binding) and the spawner (before locking).
+        The control channel's advert lives here: on POSIX a 0o700 parent keeps the
+        Unix socket unreachable during the window before the endpoint tightens it to
+        0o600, and on Windows it holds the bearer-token ``daemon.endpoint`` file.
+        ``chmod`` re-runs after ``mkdir`` to defeat a permissive umask on a
+        pre-existing directory (a near-no-op on Windows, where the token is the real
+        boundary). Called by both the daemon (before binding) and the spawner.
         """
         ensure_private_dir(self.data_dir)
         return ensure_private_dir(self.daemon_dir)
