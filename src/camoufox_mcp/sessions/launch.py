@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -7,6 +8,8 @@ if TYPE_CHECKING:
 
     from camoufox_mcp.config import ServerConfig
     from camoufox_mcp.sessions.init_options import SessionInitOptions
+
+_IS_LINUX = sys.platform.startswith("linux")
 
 
 def build_launch_kwargs(
@@ -22,8 +25,14 @@ def build_launch_kwargs(
     ``headless`` uses the per-session override when supplied, else the server-wide
     ``config.headless`` default.
     """
+    headless = config.headless if opts.headless is None else opts.headless
+    if headless == "virtual" and not _IS_LINUX:
+        raise ValueError(
+            "headless 'virtual' requires Linux (it spawns an Xvfb X server); "
+            "use 'true' on this platform"
+        )
     kwargs: dict[str, Any] = {
-        "headless": config.headless if opts.headless is None else opts.headless,
+        "headless": headless,
         "humanize": True,
         "persistent_context": True,
         "user_data_dir": str(user_data_dir),
