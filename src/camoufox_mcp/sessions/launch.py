@@ -11,6 +11,16 @@ if TYPE_CHECKING:
 
 _IS_LINUX = sys.platform.startswith("linux")
 
+# Camoufox decides whether `humanize` carries a max cursor-travel time with
+# `isinstance(humanize, (int, float))` — and in Python `isinstance(True, int)` is
+# True, so passing the plain bool forwards `humanize:maxTime = true` to the browser.
+# Firefox rejects it ("Value for key 'humanize:maxTime' is not a double") and the
+# humanised cursor never completes a move: `Page.dispatchMouseEvent(mousemove)` then
+# goes unanswered forever, hanging every click/hover that has to travel. Passing an
+# explicit float keeps humanisation enabled and correctly typed. 1.5s is the
+# window-traversal time Camoufox documents as typical.
+_HUMANIZE_MAX_SECONDS = 1.5
+
 
 def build_launch_kwargs(
     config: ServerConfig,
@@ -33,7 +43,7 @@ def build_launch_kwargs(
         )
     kwargs: dict[str, Any] = {
         "headless": headless,
-        "humanize": True,
+        "humanize": _HUMANIZE_MAX_SECONDS,
         "persistent_context": True,
         "user_data_dir": str(user_data_dir),
         "block_images": opts.block_images,
