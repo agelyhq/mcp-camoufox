@@ -4,24 +4,22 @@ import asyncio
 import contextlib
 import logging
 import sys
-import time
 from typing import TYPE_CHECKING
 
 from camoufox_mcp.bootstrap import build_deps, build_server
 from camoufox_mcp.config import ServerConfig
+from camoufox_mcp.daemon.endpoint import ENDPOINT
 from camoufox_mcp.daemon.lifecycle import ActivityState, ActivityTracker, idle_watchdog
 from camoufox_mcp.daemon.routes import register_daemon_routes
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    """Run the shared daemon: the REAL server over HTTP on a Unix domain socket.
+    """Run the shared daemon: the REAL server over HTTP on the platform control channel.
 
     Invoked as ``python -m camoufox_mcp.daemon`` (or the ``camoufox-mcp-daemon``
     console script) by the thin stdio proxy. Auto-update, telemetry and the
@@ -32,11 +30,12 @@ def main() -> None:
     try:
         asyncio.run(_serve(config))
     finally:
-        _cleanup_socket(config)
+        ENDPOINT.cleanup(config)
 
 
 async def _serve(config: ServerConfig) -> None:
-    config.ensure_daemon_dir()  # 0o700 parent must exist before uvicorn binds the UDS
+    config.ensure_daemon_dir()  # 0o700 parent must exist before the channel is bound
+    bound = ENDPOINT.bind(config)
     deps = build_deps(config)
     mcp: FastMCP = build_server(config, deps=deps)
     state = ActivityState()
@@ -44,38 +43,20 @@ async def _serve(config: ServerConfig) -> None:
     mcp.add_middleware(ActivityTracker(state))
 
     watchdog = asyncio.create_task(idle_watchdog(config, deps.sessions, state))
-    tighten = asyncio.create_task(_tighten_socket_mode(config.daemon_socket_path))
+    harden = asyncio.create_task(ENDPOINT.harden_when_ready(config))
     try:
         await mcp.run_http_async(
             transport="http",
             show_banner=False,
             host_origin_protection=False,
-            uvicorn_config={"uds": str(config.daemon_socket_path)},
+            middleware=bound.middleware,
+            **bound.run_kwargs,
         )
     finally:
-        for task in (watchdog, tighten):
+        for task in (watchdog, harden):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-
-
-async def _tighten_socket_mode(socket_path: Path) -> None:
-    """Restrict the control socket to the owning user as soon as uvicorn binds it.
-
-    uvicorn chmods a freshly created Unix socket to 0o666; that would let any
-    local user reach /shutdown and the full browser-driving MCP surface.
-    """
-    deadline = time.monotonic() + 10.0
-    while time.monotonic() < deadline:
-        if socket_path.exists():
-            socket_path.chmod(0o600)
-            return
-        await asyncio.sleep(0.05)
-
-
-def _cleanup_socket(config: ServerConfig) -> None:
-    with contextlib.suppress(OSError):
-        config.daemon_socket_path.unlink()
 
 
 def _configure_logging() -> None:

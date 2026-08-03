@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import signal
+import sys
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -62,12 +63,24 @@ class ActivityTracker(Middleware):
 
 
 def schedule_self_terminate(delay: float = 0.1) -> None:
-    """Ask uvicorn for a graceful shutdown by delivering SIGTERM to ourselves.
+    """Ask uvicorn for a graceful shutdown by raising SIGTERM in this process.
 
     Deferred so an in-flight response (e.g. the /shutdown reply) flushes first.
+    uvicorn installs a SIGTERM handler via ``signal.signal`` and its tick loop
+    picks the signal up within ~0.1s. On Windows ``os.kill`` with a non-CTRL signal
+    would call TerminateProcess — an abrupt kill that skips uvicorn's graceful
+    shutdown and the daemon's endpoint cleanup — so the signal is raised in-process
+    there instead.
     """
     loop = asyncio.get_running_loop()
-    loop.call_later(delay, lambda: os.kill(os.getpid(), signal.SIGTERM))
+    loop.call_later(delay, _raise_terminate)
+
+
+def _raise_terminate() -> None:
+    if sys.platform == "win32":
+        signal.raise_signal(signal.SIGTERM)
+    else:
+        os.kill(os.getpid(), signal.SIGTERM)
 
 
 async def idle_watchdog(

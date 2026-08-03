@@ -25,7 +25,8 @@ src/camoufox_mcp/
   dom/          # UID snapshot system + JS injection (evaluated via Page.evaluate)
   tools/        # one file per tool; _base.py (@tool + get_session/get_page), _errors.py
                 # (error rendering), _observe.py (observation), _text.py (render/truncate)
-  daemon/       # opt-in shared daemon: main/routes, proxy, spawn, lifecycle (TTL), identity, errors
+  daemon/       # opt-in shared daemon: main/routes, proxy, spawn, lifecycle (TTL), identity,
+                # errors, endpoint (POSIX UDS vs Windows loopback+token strategy), auth (token gate)
 ```
 
 Dependencies point inward: `tools/` → `sessions/` + `dom/` → `config.py`.
@@ -101,17 +102,35 @@ Dependencies point inward: `tools/` → `sessions/` + `dom/` → `config.py`.
   only blocks on a cold install (no binary at all); the version check + refresh
   run in a background task, throttled to once per 24h via a stamp file. So
   concurrent server starts never stall on the GitHub check.
+- Camoufox's humanised cursor (`humanize`) is **opt-in** via `CAMOUFOX_HUMANIZE`
+  (a duration in seconds) and off by default: with it enabled Firefox intermittently
+  stops answering the Juggler protocol mid-`Page.dispatchMouseEvent` while the process
+  stays alive, so the pending click/hover never returns and the caller hangs forever.
+  Every E2E run with it on froze at a random test; every run without it passed 145/145.
+  When it IS enabled the value must reach Camoufox as a **float** — Camoufox tests
+  `isinstance(humanize, (int, float))` and Python's bool subclasses int, so a bare
+  `True` sends `humanize:maxTime = true`, which Firefox rejects as "not a double".
 - `CAMOUFOX_HEADLESS` unset defaults to a visible window, which needs a working
   desktop GL stack; `virtual` (Xvfb) is the reliable invisible mode and what the
-  E2E suite exercises alongside `true`. `virtual` mutates the **process-global**
-  `DISPLAY`, so never mix visible and virtual sessions in one process.
+  E2E suite exercises alongside `true`. `virtual` is **Linux-only** — Xvfb does not
+  exist on Windows/macOS, so `build_launch_kwargs` raises `ValueError` there; use
+  `true`. `virtual` mutates the **process-global** `DISPLAY`, so never mix visible
+  and virtual sessions in one process.
 - Daemon is **opt-in** (`CAMOUFOX_DAEMON=true`); with it unset the code path is
   byte-identical to before. The proxy runs no auto-update, telemetry, or
-  `SessionManager` — those live only in the daemon. The daemon's UDS socket is
-  chmod `0o600`; its TTL exits **only** at zero active sessions AND zero in-flight
-  requests (never evicts a live session); the identity check is `version` +
-  `code_path` (idle mismatch respawns, live-session mismatch is reused with a
-  warning).
+  `SessionManager` — those live only in the daemon. Its TTL exits **only** at zero
+  active sessions AND zero in-flight requests (never evicts a live session); the
+  identity check is `version` + `code_path` (idle mismatch respawns, live-session
+  mismatch is reused with a warning).
+- The daemon's control channel is abstracted by `daemon/endpoint.py` (`ENDPOINT`
+  singleton chosen at import by `os.name`): POSIX serves over a `0o600` Unix socket;
+  Windows serves over a `127.0.0.1` loopback socket whose only access boundary is a
+  per-daemon bearer token (`daemon/auth.py`), advertised with `{host, port, token}`
+  in a `0o600` `daemon.endpoint` file. The spawn lock is `filelock`, the detached
+  spawn uses `start_new_session` (POSIX) or `DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP`
+  (Windows), and self-terminate raises `SIGTERM` in-process on Windows (an `os.kill`
+  there would be an abrupt TerminateProcess). Keep POSIX behavior untouched when
+  editing this layer.
 
 ## Build / lint / test
 
@@ -129,7 +148,8 @@ make run       # uv run camoufox-mcp
   screencast, CPU throttling. Camoufox is Firefox-based — these have no equivalent
   and are deliberately not emulated.
 - Network HTTP/SSE transport — the client-facing transport is stdio only; the
-  daemon's internal HTTP runs over a private Unix socket, never a TCP port.
+  daemon's internal HTTP runs over a private Unix socket (POSIX) or a token-guarded
+  loopback socket (Windows), never a routable TCP port.
 - PyPI distribution — GitHub install only (`uvx --from git+...` or clone).
 - Cloud/S3 profile sync — profiles are local-disk only.
 - Session TTL / auto-eviction — sessions close only via explicit `close_session`;

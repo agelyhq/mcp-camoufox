@@ -77,6 +77,7 @@ class ServerConfig:
     camoufox_binary: str | None
     addon_urls: tuple[str, ...]
     auto_update: bool
+    humanize: float | None
     session_defaults: SessionDefaults
     daemon_enabled: bool
     daemon_ttl_seconds: int
@@ -102,6 +103,11 @@ class ServerConfig:
     @property
     def daemon_socket_path(self) -> Path:
         return self.daemon_dir / "daemon.sock"
+
+    @property
+    def daemon_endpoint_path(self) -> Path:
+        """Windows advert file: the daemon's loopback host, port and bearer token."""
+        return self.daemon_dir / "daemon.endpoint"
 
     @property
     def daemon_lock_path(self) -> Path:
@@ -134,11 +140,12 @@ class ServerConfig:
     def ensure_daemon_dir(self) -> Path:
         """Create ``<data_dir>/daemon/`` restricted to the owner, then return it.
 
-        The socket lives here so it is never world-reachable during the window
-        between uvicorn's permissive bind and ``_tighten_socket_mode``: a 0o700
-        parent gates access regardless of the socket's own mode. ``chmod`` re-runs
-        after ``mkdir`` to defeat a permissive umask on a pre-existing directory.
-        Called by both the daemon (before binding) and the spawner (before locking).
+        The control channel's advert lives here: on POSIX a 0o700 parent keeps the
+        Unix socket unreachable during the window before the endpoint tightens it to
+        0o600, and on Windows it holds the bearer-token ``daemon.endpoint`` file.
+        ``chmod`` re-runs after ``mkdir`` to defeat a permissive umask on a
+        pre-existing directory (a near-no-op on Windows, where the token is the real
+        boundary). Called by both the daemon (before binding) and the spawner.
         """
         ensure_private_dir(self.data_dir)
         return ensure_private_dir(self.daemon_dir)
@@ -154,10 +161,36 @@ class ServerConfig:
             camoufox_binary=os.getenv("CAMOUFOX_BINARY") or None,
             addon_urls=_parse_addons(os.getenv("CAMOUFOX_ADDON_URLS")),
             auto_update=(os.getenv("CAMOUFOX_AUTO_UPDATE", "true").lower() != "false"),
+            humanize=_parse_humanize(os.getenv("CAMOUFOX_HUMANIZE")),
             session_defaults=_parse_session_defaults(),
             daemon_enabled=(os.getenv("CAMOUFOX_DAEMON", "false").lower() == "true"),
             daemon_ttl_seconds=_parse_ttl(os.getenv("CAMOUFOX_DAEMON_TTL")),
         )
+
+
+def _parse_humanize(raw: str | None) -> float | None:
+    """Parse ``CAMOUFOX_HUMANIZE`` into a max cursor-travel time, or ``None`` when off.
+
+    Humanised cursor movement is OPT-IN because it intermittently wedges the browser:
+    Camoufox interpolates the motion inside Firefox, and the process then stops
+    answering the Juggler protocol mid-``Page.dispatchMouseEvent`` while staying
+    alive, so the pending call never returns. Measured on the E2E suite: every run
+    with humanisation on froze at a random test, while runs with it off completed
+    145/145. Set the variable to a duration in seconds (e.g. ``1.5``) to accept that
+    risk in exchange for the anti-detection benefit.
+    """
+    if raw is None or raw.strip() == "" or raw.strip().lower() in {"false", "off", "0"}:
+        return None
+    try:
+        value = float(raw.strip())
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid CAMOUFOX_HUMANIZE={raw!r}; expected a duration in seconds "
+            "(e.g. '1.5'), or 'false' to disable"
+        ) from exc
+    if value <= 0:
+        raise ValueError(f"Invalid CAMOUFOX_HUMANIZE={raw!r}; must be > 0")
+    return value
 
 
 def _parse_ttl(raw: str | None) -> int:
