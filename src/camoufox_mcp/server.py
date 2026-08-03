@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 
 from camoufox_mcp.bootstrap import build_server
 from camoufox_mcp.config import ServerConfig
-from camoufox_mcp.daemon.proxy import run_proxy
 
 
 def _configure_logging(config: ServerConfig) -> None:
@@ -28,6 +27,11 @@ def main() -> None:
     config = ServerConfig.from_env()
     _configure_logging(config)
     if config.daemon_enabled:
+        # Imported lazily: the daemon subsystem pulls in POSIX-only spawn machinery
+        # on some paths, and the default (non-daemon) stdio server must import on
+        # every platform without touching it.
+        from camoufox_mcp.daemon.proxy import run_proxy
+
         run_proxy(config)
     else:
         build_server(config).run(transport="stdio")
