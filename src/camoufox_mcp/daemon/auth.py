@@ -21,14 +21,16 @@ class TokenAuthMiddleware:
 
     def __init__(self, app: ASGIApp, token: str) -> None:
         self._app = app
-        self._expected = f"Bearer {token}"
+        self._expected = f"Bearer {token}".encode()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self._app(scope, receive, send)
             return
         headers = dict(scope.get("headers") or [])
-        provided = headers.get(b"authorization", b"").decode("latin-1")
+        # Compared as bytes: decoding first would make compare_digest raise
+        # TypeError on any header byte >= 0x80 instead of answering 401.
+        provided = headers.get(b"authorization", b"")
         if not secrets.compare_digest(provided, self._expected):
             await PlainTextResponse("unauthorized", status_code=401)(scope, receive, send)
             return
