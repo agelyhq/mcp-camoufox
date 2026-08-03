@@ -21,6 +21,7 @@ dev = [
     "flask>=3.0",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "pytest-timeout>=2.3",
     "ruff>=0.9",
 ]
 
@@ -64,3 +65,9 @@ known-first-party = ["camoufox_mcp"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# A browser that dies mid-call (TargetClosedError) leaves the in-flight MCP request
+# awaiting a reply that never comes, and fastmcp's client waits without a timeout —
+# so the run hangs forever instead of failing. This bounds every test.
+# "thread" (not "signal") because SIGALRM does not exist on Windows.
+timeout = 180
+timeout_method = "thread"

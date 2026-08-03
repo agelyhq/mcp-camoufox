@@ -277,6 +277,11 @@ Tests use an in-memory `fastmcp.Client(mcp)` against the real tool set and a rea
 (headless) Camoufox browser plus a local Flask server serving
 `tests/templates/*.html` — nothing browser-side is mocked, no Internet needed.
 
+Every test is bounded by `pytest-timeout` (180s, `thread` method — `signal` would
+need a `SIGALRM` that Windows lacks). Without it a browser dying mid-call leaves the
+in-flight MCP request awaiting a reply that never arrives, and the run hangs forever
+instead of failing; the timeout dumps every thread's stack so the culprit is visible.
+
 ## Telemetry / logs
 
 Every tool call appends one JSON object per line to a per-profile log file:
