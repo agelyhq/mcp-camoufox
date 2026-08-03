@@ -19,7 +19,10 @@ lacks: anti-detect fingerprinting, GeoIP-aware proxies, humanized cursor.
 ## Tech Stack
 
 - **Python 3.12+**
-- **FastMCP 3.x** — MCP framework, stdio transport (plus HTTP-over-UDS for the
+- **Linux, macOS, Windows** — the stdio server and the optional daemon run on all
+  three; only `CAMOUFOX_HEADLESS=virtual` (Xvfb) is Linux-only
+- **FastMCP 3.x** — MCP framework, stdio transport (plus HTTP over a Unix domain
+  socket on POSIX, or a token-authenticated loopback socket on Windows, for the
   optional daemon proxy)
 - **Camoufox** (`camoufox[geoip]`) — anti-detect Firefox, wraps Playwright
 - **Playwright async API** — page/browser control under the hood
@@ -159,15 +162,16 @@ CDP/V8-only capabilities with no Firefox equivalent:
   features without a Playwright/Firefox equivalent worth faking.
 - **Network HTTP/SSE transport** — the client-facing transport is stdio only;
   this server is spawned as a subprocess by an MCP client, never exposed on a TCP
-  port. The optional daemon (below) talks HTTP over a private Unix domain socket,
-  not a network service.
+  port. The optional daemon (below) talks HTTP over a private Unix domain socket
+  (POSIX) or a token-guarded `127.0.0.1` loopback socket (Windows), never a routable
+  network service.
 - **Cloud/S3 profile sync** — profiles are local-disk only.
 
 ## Environment variables
 
 | Var | Default | Meaning |
 |---|---|---|
-| `CAMOUFOX_HEADLESS` | unset → visible window | `true` (headless) / `virtual` (Xvfb, Linux only) / `false` (visible). A visible window needs a working desktop GL stack; when in doubt use `virtual` (invisible, best anti-detection). |
+| `CAMOUFOX_HEADLESS` | unset → visible window | `true` (headless) / `virtual` (Xvfb, **Linux only** — rejected at launch on Windows/macOS, use `true` there) / `false` (visible). A visible window needs a working desktop GL stack; on Linux, when in doubt use `virtual` (invisible, best anti-detection). |
 | `CAMOUFOX_PROXY` | (none) | `http://user:pass@host:port` — parsed into a Playwright proxy dict; forces `geoip=True` |
 | `CAMOUFOX_DATA_DIR` | `platformdirs.user_data_dir("camoufox-mcp")` | Base directory for profiles + logs |
 | `CAMOUFOX_FINGERPRINT_OS` | random | Default fingerprint OS: `windows` / `linux` / `macos` |
@@ -201,11 +205,18 @@ process. Profile isolation is unchanged — it is still keyed by `profile` name.
   mid-conversation is not respawned until the next conversation starts. For
   debugging, run it in the foreground with `camoufox-mcp-daemon` (or
   `python -m camoufox_mcp.daemon`).
-- **Socket.** Transport is HTTP over a Unix domain socket at
-  `<data_dir>/daemon/daemon.sock` (uvicorn `uds`; client via httpx). Its parent
-  `<data_dir>/daemon/` (which also holds the spawn lock and log) is created `0o700`,
-  so the socket is never world-reachable during the brief window before it is itself
-  tightened to `0o600` (owner-only) right after bind.
+- **Transport.** The proxy reaches the daemon over a private HTTP control channel,
+  bound before uvicorn starts by the platform `daemon/endpoint.py` strategy:
+  - **POSIX** — a Unix domain socket at `<data_dir>/daemon/daemon.sock` (uvicorn
+    `uds`; client via httpx). Its parent `<data_dir>/daemon/` (which also holds the
+    spawn lock and log) is created `0o700`, so the socket is never world-reachable
+    during the brief window before it is itself tightened to `0o600` right after bind.
+  - **Windows** — a `127.0.0.1` loopback socket on an ephemeral port (asyncio has no
+    Unix-socket server there). Since any local process can reach loopback, every
+    request must carry a per-daemon bearer token; the daemon advertises
+    `{host, port, token}` in a `0o600` `<data_dir>/daemon/daemon.endpoint` file, and
+    `TokenAuthMiddleware` rejects any unauthenticated request. The spawn lock is a
+    cross-platform `filelock`.
 - **TTL.** The daemon self-terminates after `CAMOUFOX_DAEMON_TTL` seconds (default
   1800) but **only** when there are zero active sessions AND zero in-flight
   requests — it never evicts live browsers to hit the timeout.
@@ -256,6 +267,11 @@ make test      # CAMOUFOX_HEADLESS=true uv run pytest
 make run       # uv run camoufox-mcp — starts the stdio server directly
 make clean     # remove .venv, caches, build artifacts
 ```
+
+The `Makefile` targets assume a POSIX shell; on Windows run the underlying `uv`
+commands directly (`uv sync --extra dev`, `uv run ruff check .`, `uv run pytest`).
+The `virtual`-display E2E cases self-skip when `Xvfb` is absent (i.e. everywhere but
+Linux).
 
 Tests use an in-memory `fastmcp.Client(mcp)` against the real tool set and a real
 (headless) Camoufox browser plus a local Flask server serving

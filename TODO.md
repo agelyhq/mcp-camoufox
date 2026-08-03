@@ -40,11 +40,24 @@ exposes a safe constrained-resize primitive.
   mid-conversation health re-check / respawn if that proves painful in practice.
 - Known rare race on the identity-**mismatch** path: if a session lands between the
   health probe and `/shutdown`, the `409` + timeout path can unlink a **live**
-  daemon's socket. Fix idea: inode-ownership-aware cleanup (only unlink the socket
-  the doomed daemon actually created) instead of blind removal.
+  daemon's advert (the socket on POSIX, the `daemon.endpoint` file on Windows). Fix
+  idea: ownership-aware cleanup (only remove the advert the doomed daemon created)
+  instead of blind removal.
 - AF_UNIX socket paths are capped near ~108 chars; a very long `CAMOUFOX_DATA_DIR`
-  would overflow `<data_dir>/daemon.sock`. Fix idea: relocate the socket under
+  would overflow `<data_dir>/daemon.sock` (POSIX only — Windows uses a loopback port,
+  so the path length is irrelevant there). Fix idea: relocate the socket under
   `XDG_RUNTIME_DIR` (short, per-user) while keeping profiles under the data dir.
+
+## Windows daemon transport (standing decision, 2026-08-03)
+
+The daemon control channel is platform-abstracted (`daemon/endpoint.py`). Windows
+cannot serve over a Unix socket (asyncio has no `create_unix_server` there), so it
+binds a `127.0.0.1` loopback socket and guards every route with a per-daemon bearer
+token (`daemon/auth.py`), advertised in a `0o600` `daemon.endpoint` file. This trades
+the POSIX file-mode boundary for a token boundary — acceptable because the directory
+`chmod 0o700` is itself weak on Windows. If a stronger boundary is ever needed there,
+apply an explicit owner-only ACL to the daemon dir (via `icacls`/`pywin32`) on top of
+the token.
 
 ## Display modes
 
