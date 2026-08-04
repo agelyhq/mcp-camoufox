@@ -1,14 +1,19 @@
 [project]
 name = "camoufox-mcp"
 version = "0.2.0"
-description = "MCP server for Camoufox anti-detect browser"
+description = "Browser automation MCP server that does not get blocked, backed by Camoufox anti-detect Firefox"
+readme = "README.md"
 requires-python = ">=3.12"
+license = "LicenseRef-FSL-1.1-MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Fabien Vauchelles" }]
+keywords = ["mcp", "browser-automation", "camoufox", "firefox", "anti-detect", "claude-code"]
 dependencies = [
     "fastmcp>=3.4.4",
     # camoufox and playwright are bounded together: an unbounded (transitive)
     # playwright once drifted ahead of the installed Camoufox binary's Juggler
     # protocol schema and every launch failed with a Browser.setDefaultViewport
-    # protocol error (TODO item 14, 2026-07-15 production incident).
+    # protocol error (2026-07-15 incident, see docs/decisions.md).
     "camoufox[geoip]>=0.4.11,<0.5",
     "playwright>=1.58,<1.59",
     "platformdirs>=4.0",
@@ -24,6 +29,11 @@ dev = [
     "pytest-timeout>=2.3",
     "ruff>=0.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/agelyhq/mcp-camoufox"
+Documentation = "https://github.com/agelyhq/mcp-camoufox/tree/main/docs"
+Issues = "https://github.com/agelyhq/mcp-camoufox/issues"
 
 [project.scripts]
 camoufox-mcp = "camoufox_mcp.server:main"
