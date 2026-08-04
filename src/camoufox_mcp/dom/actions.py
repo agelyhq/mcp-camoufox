@@ -6,6 +6,7 @@ from camoufox_mcp.dom.snapshot import (
     get_clear_field_js,
     get_file_input_selector_js,
     get_scroll_into_view_js,
+    get_select_options_js,
 )
 from camoufox_mcp.dom.uid import resolve_uid_or_raise, run_js_action, uid_selector
 
@@ -33,12 +34,40 @@ async def file_input_selector(page: EvaluatablePage, uid: str) -> dict[str, obje
     return await run_js_action(page, uid, get_file_input_selector_js)
 
 
-async def fill_field(page: ActionablePage, uid: str, value: str, clear_first: bool = True) -> str:
-    """Focus an editable element by uid and type ``value`` into it.
+def _match_option(options: list[dict[str, str]], value: str) -> str | None:
+    """Find the option value matching ``value`` by value, then label, then case-insensitively."""
+    for key in ("value", "label"):
+        for option in options:
+            if option.get(key) == value:
+                return option["value"]
+    folded = value.casefold()
+    for option in options:
+        if option.get("label", "").casefold() == folded:
+            return option["value"]
+    return None
 
-    Resolves the uid, verifies it is editable, scrolls it into view, focuses it,
-    optionally clears it, then types. Raises ``ValueError`` for unknown/stale uids
-    or non-editable elements. Returns ``Filled <tag> with N chars``.
+
+async def _select_option(page: ActionablePage, uid: str, selector: str, value: str) -> str:
+    """Pick an option in a ``<select>``, matching on value, then label, then case-insensitively."""
+    info = await run_js_action(page, uid, get_select_options_js)
+    options = info.get("options")
+    if not isinstance(options, list):
+        raise ValueError(f"could not read the options of uid '{uid}'")
+    matched = _match_option(options, value)
+    if matched is None:
+        available = ", ".join(repr(str(o.get("label") or o.get("value"))) for o in options)
+        raise ValueError(f"no option matching '{value}'; available options are {available}")
+    await page.raw.select_option(selector, value=matched)
+    return f"Selected '{value}' in <select>"
+
+
+async def fill_field(page: ActionablePage, uid: str, value: str, clear_first: bool = True) -> str:
+    """Set the value of an editable element by uid.
+
+    Resolves the uid, verifies it is editable, and scrolls it into view. A
+    ``<select>`` picks the matching option (by value, falling back to label);
+    anything else is focused, optionally cleared, then typed into. Raises
+    ``ValueError`` for unknown/stale uids or non-editable elements.
     """
     info = await resolve_uid_or_raise(page, uid)
     tag = info.get("tag", "?")
@@ -49,6 +78,8 @@ async def fill_field(page: ActionablePage, uid: str, value: str, clear_first: bo
         )
     await scroll_into_view(page, uid)
     selector = uid_selector(uid)
+    if tag == "select":
+        return await _select_option(page, uid, selector, value)
     await page.raw.focus(selector)
     if clear_first:
         await clear_field(page, uid)

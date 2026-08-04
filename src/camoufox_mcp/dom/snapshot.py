@@ -62,3 +62,7 @@ def get_scroll_into_view_js() -> str:
 
 def get_file_input_selector_js() -> str:
     return _load_js("file_input_selector.js")
+
+
+def get_select_options_js() -> str:
+    return _load_js("select_options.js")
