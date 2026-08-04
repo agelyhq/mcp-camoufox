@@ -6,20 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Changed
+## [0.2.0] - 2026-08-04
 
-- Documentation reorganised: the README is now an introduction and an install guide,
-  and the full reference moved to `docs/`.
-
-## [0.2.0] - 2026-08-03
-
-Windows support.
+Windows support, and a documentation set worth reading.
 
 ### Added
 
 - Windows support for both the stdio server and the optional daemon. The daemon
   control channel is now platform-abstracted: a Unix domain socket on POSIX, and a
   `127.0.0.1` loopback socket guarded by a per-daemon bearer token on Windows.
+- `snapshot` surfaces a form control's associated `<label for>` text as `label=<text>`.
+  Without it, a `<select>` or an input with no `name` and no `placeholder` could not be
+  targeted by its visible name, which is how most real forms are written.
+- Documentation in `docs/`, one page per task: getting started, profiles, anti-bot,
+  isolation, tools, configuration, daemon, telemetry, architecture and decisions, plus
+  contributing guidelines and this changelog. Issue templates for bug reports and for
+  sites that still block the browser.
 - `CAMOUFOX_HUMANIZE`, which takes a duration in seconds, enables Camoufox's humanised
   mouse movement.
 - Every test is bounded by `pytest-timeout`, so a browser dying mid-call fails the run
@@ -36,6 +38,10 @@ Windows support.
 
 ### Fixed
 
+- `fill` on a `<select>` now picks the matching option instead of typing into it. It
+  matches on option value, then on visible label, then case-insensitively, and lists the
+  available options when nothing matches. Typing relied on Firefox type-ahead matching,
+  which silently selected the wrong option whenever the value was not a unique prefix.
 - The daemon proxy is imported lazily, so the server starts on Windows.
 - The daemon bearer token is compared as bytes.
 - `humanize` reaches Camoufox as a float. Python's `bool` subclasses `int`, so passing
