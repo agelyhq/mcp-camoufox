@@ -36,6 +36,14 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/camoufox_mcp"]
 
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+include = ["src"]
+exclude = ["**/__pycache__"]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100
