@@ -1,0 +1,79 @@
+name: Blocked site
+description: A site still detects the browser, blocks it, or refuses the sign-in
+labels: ["blocked-site"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Camoufox gets past most bot detection, not all of it. These reports are useful:
+        they tell us whether the gap is a Camoufox fingerprint issue (upstream), an IP
+        reputation issue (yours to fix, usually with a residential proxy), or something
+        this server does wrong.
+
+        Please do not include credentials, cookies, or session tokens.
+
+  - type: input
+    id: site
+    attributes:
+      label: Site
+      description: The domain, and the specific page or flow if it matters.
+      placeholder: "accounts.example.com, the sign-in step after entering the password"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What the site does
+      options:
+        - "Endless CAPTCHA or challenge loop"
+        - "Sign-in refused (this browser is not secure, or similar)"
+        - "Blank page or immediate redirect"
+        - "403 / access denied"
+        - "Account flagged or locked after use"
+        - "Other"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: headless
+    attributes:
+      label: CAMOUFOX_HEADLESS
+      description: Visible windows are harder to detect than headless ones. On Linux, `virtual` behaves like a visible window.
+      options:
+        - "unset (visible window)"
+        - "true"
+        - "false"
+        - "virtual"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: manual-check
+    attributes:
+      label: Does the same site work in a normal browser, from the same machine and IP?
+      description: If it also fails there, the problem is your IP reputation, not the fingerprint.
+      options:
+        - "Yes, works normally"
+        - "No, also blocked"
+        - "Not tested"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: proxy
+    attributes:
+      label: Proxy
+      options:
+        - "No proxy (direct connection)"
+        - "Datacenter proxy"
+        - "Residential proxy"
+        - "VPN"
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: What you tried
+      description: Which tools you called, in what order, and where it broke.

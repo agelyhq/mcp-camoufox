@@ -1,0 +1,84 @@
+name: Bug report
+description: Something breaks, hangs, or returns the wrong result
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: if a website blocks the browser, use the "Blocked site" template
+        instead. This one is for the server itself misbehaving.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you asked the agent to do, and what the tool returned.
+      placeholder: |
+        Called navigate(profile="work", url="https://example.com") and got
+        "Error: PlaywrightError: Target closed" instead of the page.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "Output of: git rev-parse --short HEAD (or the git ref you installed from)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+    validations:
+      required: true
+
+  - type: dropdown
+    id: headless
+    attributes:
+      label: CAMOUFOX_HEADLESS
+      options:
+        - "unset (visible window)"
+        - "true"
+        - "false"
+        - "virtual"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: daemon
+    attributes:
+      label: Daemon mode
+      options:
+        - "off (default)"
+        - "CAMOUFOX_DAEMON=true"
+    validations:
+      required: true
+
+  - type: textarea
+    id: telemetry
+    attributes:
+      label: Telemetry lines
+      description: |
+        The last few lines of the JSONL log for the profile involved. They live in
+        `<data_dir>/logs/<profile>.jsonl` (see docs/telemetry.md for where data_dir is
+        on your platform). Redact URLs if they are sensitive.
+      render: json
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Other environment variables you set, a proxy, an unusual profile setup.
