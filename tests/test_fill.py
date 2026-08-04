@@ -55,6 +55,38 @@ async def test_fill_contenteditable(client: Client, flask_server: str) -> None:
     assert "Edited content" in js
 
 
+async def test_fill_select_by_value(client: Client, flask_server: str) -> None:
+    uid = await goto_and_find(client, f"{flask_server}/fill", PROFILE, "Choose option")
+
+    result = tool_text(
+        await client.call_tool("fill", {"profile": PROFILE, "uid": uid, "value": "banana"})
+    )
+    assert "selected" in result.lower()
+
+    js = await text_content(client, PROFILE, "select-output")
+    assert "banana" in js
+
+
+async def test_fill_select_by_label(client: Client, flask_server: str) -> None:
+    """The visible label works too, which is what an agent reads off a snapshot."""
+    uid = await goto_and_find(client, f"{flask_server}/fill", PROFILE, "Choose option")
+
+    await client.call_tool("fill", {"profile": PROFILE, "uid": uid, "value": "Cherry"})
+
+    js = await text_content(client, PROFILE, "select-output")
+    assert "cherry" in js
+
+
+async def test_fill_select_unknown_option_lists_choices(client: Client, flask_server: str) -> None:
+    uid = await goto_and_find(client, f"{flask_server}/fill", PROFILE, "Choose option")
+
+    result = tool_text(
+        await client.call_tool("fill", {"profile": PROFILE, "uid": uid, "value": "durian"})
+    )
+    assert "error" in result.lower()
+    assert "Apple" in result and "Banana" in result
+
+
 async def test_fill_non_editable(client: Client, flask_server: str) -> None:
     uid = await goto_and_find(client, f"{flask_server}/fill", PROFILE, "Index")
 
