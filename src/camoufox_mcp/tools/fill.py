@@ -23,11 +23,15 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
         clear_first: bool = True,
         observe: str = "none",
     ) -> str:
-        """Type text into an input, textarea or contenteditable, by uid or selector.
+        """Set a field's value by uid or selector: input, textarea, select or contenteditable.
 
         Provide EXACTLY ONE of ``uid`` or ``selector`` (both or neither raises). The
         uid path focuses the snapshot element and types; the selector path is
         Playwright-native and fills the FIRST match.
+
+        On a ``<select>`` the uid path picks the matching option instead of typing:
+        ``value`` is matched against each option's value, then its visible label,
+        then its label case-insensitively.
 
         Parameters:
         - profile: session/profile name.
@@ -43,9 +47,9 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
           ``snapshot``) or ``"text"`` (page body innerText, capped at 4000 chars).
           Example: ``observe="text"`` to fill then read back the rendered page.
 
-        Returns a confirmation like ``Filled <input> with 12 chars`` (uid) or
-        ``Filled #email with 12 chars`` (selector), optionally followed by the
-        observation block.
+        Returns a confirmation like ``Filled <input> with 12 chars`` (uid),
+        ``Filled #email with 12 chars`` (selector) or ``Selected 'Cherry' in
+        <select>``, optionally followed by the observation block.
 
         Errors:
         - ``Error: ValueError: provide exactly one of uid or selector``.
@@ -53,6 +57,8 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
         - ``Error: ValueError: unknown or stale uid '<uid>'; take a new snapshot``.
         - ``Error: ValueError: element <tag> is not editable; ...`` (uid path) when
           the target is not an input, textarea, select or contenteditable element.
+        - ``Error: ValueError: no option matching '<v>'; available options are ...``
+          when a ``<select>`` has no option with that value or label.
         """
         validate_observe(observe)
         if (uid is None) == (selector is None):

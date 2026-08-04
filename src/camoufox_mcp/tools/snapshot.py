@@ -14,11 +14,14 @@ if TYPE_CHECKING:
 def register(mcp: FastMCP, deps: ToolDeps) -> None:
     @tool(mcp, deps)
     async def snapshot(profile: str, max_nodes: int = 1500, interactive_only: bool = False) -> str:
-        """Capture an accessibility/UID text tree of the active tab.
+        """Capture a UID text tree of the active tab's visible DOM.
 
-        This is the primary primitive for driving a page: it walks the visible,
-        interactive DOM and returns a compact indented text tree where every
-        actionable element is tagged with a stable ``eN`` uid (e0, e1, ...). Those
+        This is the primary primitive for driving a page: it walks the visible DOM
+        with ARIA-aware heuristics (roles, aria-label, ``<label for>``, focusability)
+        and returns a compact indented text tree where every actionable element is
+        tagged with an ``eN`` uid (e0, e1, ...). It is a DOM traversal rather than
+        the browser's own accessibility tree, and it covers the top document only:
+        iframe and shadow-root content is not visible to it. Those
         uids are what ``click``, ``type``, ``select``, ``upload`` and other
         interaction tools consume.
 
