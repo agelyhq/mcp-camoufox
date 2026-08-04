@@ -76,6 +76,16 @@
     const ariaLabel = el.getAttribute('aria-label');
     if (ariaLabel) parts.push('aria-label=' + ariaLabel.slice(0, 40));
 
+    // A <label for=...> is the only visible name of many form controls, and it
+    // lives outside the element, so surface it or the agent cannot target them.
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
+      const labels = el.labels;
+      if (labels && labels.length > 0) {
+        const labelText = labels[0].textContent.trim();
+        if (labelText) parts.push('label=' + labelText.slice(0, 40));
+      }
+    }
+
     if (tag === 'INPUT') {
       const type = el.type;
       if (type === 'checkbox' || type === 'radio') {
