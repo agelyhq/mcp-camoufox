@@ -1,32 +1,45 @@
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 
-from tests.helpers import PROFILE, extract_first_reqid, goto_and_find, tool_text
+from tests.helpers import PROFILE, goto_and_find, tool_text
+from tests.waits import completed_entry, poll_tool_or_last, reqid_for
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from fastmcp import Client
+
+
+def _completed(url_fragment: str) -> Callable[[str], bool]:
+    """Accept a listing once ``url_fragment`` is captured AND has a status."""
+    return lambda listing: completed_entry(listing, url_fragment) is not None
 
 
 async def test_list_network_requests(client: Client, flask_server: str) -> None:
     uid = await goto_and_find(client, f"{flask_server}/network", PROFILE, "Fetch /api/data")
 
     await client.call_tool("click", {"profile": PROFILE, "uid": uid})
-    await asyncio.sleep(1.5)
 
-    result = tool_text(await client.call_tool("list_network_requests", {"profile": PROFILE}))
-    assert "/api/data" in result
+    # "Captured a COMPLETED request" is what the old 1.5 s nap was buying, so that is
+    # the condition polled and the condition asserted.
+    result = await poll_tool_or_last(
+        client, "list_network_requests", {"profile": PROFILE}, _completed("/api/data")
+    )
+    assert completed_entry(result, "/api/data") is not None, result
 
 
 async def test_get_network_request_details(client: Client, flask_server: str) -> None:
     uid = await goto_and_find(client, f"{flask_server}/network", PROFILE, "Fetch /api/data")
 
     await client.call_tool("click", {"profile": PROFILE, "uid": uid})
-    await asyncio.sleep(1.5)
 
-    listing = tool_text(await client.call_tool("list_network_requests", {"profile": PROFILE}))
-    reqid = extract_first_reqid(listing)
+    listing = await poll_tool_or_last(
+        client, "list_network_requests", {"profile": PROFILE}, _completed("/api/data")
+    )
+    # The id of the request the click made, not of whatever landed on the tab first: a
+    # favicon probe or an asset added to the page later used to retarget the whole test.
+    reqid = reqid_for(listing, "/api/data")
 
     detail = tool_text(
         await client.call_tool("get_network_request", {"profile": PROFILE, "reqid": reqid})
@@ -53,15 +66,14 @@ async def test_list_network_requests_filter(client: Client, flask_server: str) -
     uid = await goto_and_find(client, f"{flask_server}/network", PROFILE, "POST /api/echo")
 
     await client.call_tool("click", {"profile": PROFILE, "uid": uid})
-    await asyncio.sleep(2.5)
 
-    result = tool_text(
-        await client.call_tool(
-            "list_network_requests",
-            {"profile": PROFILE, "resource_types": ["fetch", "xhr"]},
-        )
+    result = await poll_tool_or_last(
+        client,
+        "list_network_requests",
+        {"profile": PROFILE, "resource_types": ["fetch", "xhr"]},
+        _completed("/api/echo"),
     )
-    assert "/api/echo" in result
+    assert "/api/echo" in result, result
 
 
 async def test_a_binary_post_body_does_not_poison_the_next_tool_call(

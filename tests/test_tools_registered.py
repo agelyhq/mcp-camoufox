@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from tests.helpers import PROFILE, tool_text
@@ -102,6 +103,12 @@ async def test_navigate_starts_session(client: Client, flask_server: str) -> Non
 
 
 async def test_navigate_bad_url(client: Client) -> None:
+    """A driver failure still answers the product's one-line contract.
+
+    The driver's wording for a malformed URL is its own and may change, so the type
+    slot and the single line are what is pinned: ``"error" in text.lower()`` accepted
+    a multi-line "Call log:" dump, which is exactly what the wrapper exists to strip.
+    """
     result = await client.call_tool("navigate", {"url": "not-a-real-url", "profile": PROFILE})
     text = tool_text(result)
-    assert "error" in text.lower()
+    assert re.fullmatch(r"Error: \w+: .+", text), text

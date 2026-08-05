@@ -36,8 +36,7 @@ coherent before any page script runs. Details in [docs/anti-bot.md](docs/anti-bo
 ## 📦 Install
 
 ```bash
-claude mcp add camoufox -e CAMOUFOX_HEADLESS=virtual -- \
-  uvx --from git+https://github.com/agelyhq/mcp-camoufox mcp-camoufox
+claude mcp add camoufox -e CAMOUFOX_HEADLESS=virtual -- uvx mcp-camoufox
 ```
 
 Or in any MCP client's config:
@@ -47,14 +46,12 @@ Or in any MCP client's config:
   "mcpServers": {
     "camoufox": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/agelyhq/mcp-camoufox", "mcp-camoufox"],
+      "args": ["mcp-camoufox"],
       "env": { "CAMOUFOX_HEADLESS": "virtual" }
     }
   }
 }
 ```
-
-Once it is on PyPI that shortens to `uvx mcp-camoufox`, with no `--from`.
 
 Needs Python 3.12+ and [uv](https://docs.astral.sh/uv/). The first tool call downloads the
 Camoufox browser, which is a few hundred megabytes and takes a minute or two: it happens

@@ -11,7 +11,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from tests.helpers import PROFILE, evaluate, extract_uid, tool_text
+from tests.evaluate_helpers import capped, evaluate_uids, uids_for_labels
+from tests.helpers import PROFILE, evaluate, open_page
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -22,24 +23,6 @@ _MANY_ITEMS_JS = "Array.from({length: 5341}, (_, i) => ({i: i, t: 'abcdefghij'})
 _FAT_ITEMS_JS = "Array.from({length: 50}, () => 'y'.repeat(2000))"
 _BIG_STRING_JS = "'z'.repeat(50000)"
 _CIRCULAR_JS = "(() => { const a = {}; a.self = a; return a; })()"
-
-
-async def _uids(client: Client, flask_server: str, *labels: str) -> list[str]:
-    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": PROFILE})
-    snap = tool_text(await client.call_tool("snapshot", {"profile": PROFILE}))
-    return [extract_uid(snap, label) for label in labels]
-
-
-async def _evaluate_uids(client: Client, script: str, uids: list[str]) -> str:
-    return tool_text(
-        await client.call_tool("evaluate", {"profile": PROFILE, "script": script, "uids": uids})
-    )
-
-
-async def _capped(client: Client, script: str, **caps: int) -> str:
-    return tool_text(
-        await client.call_tool("evaluate", {"profile": PROFILE, "script": script, **caps})
-    )
 
 
 def _split(result: str) -> tuple[str, str]:
@@ -55,7 +38,7 @@ def _split(result: str) -> tuple[str, str]:
 
 async def test_evaluate_small_results_are_untouched(client: Client, flask_server: str) -> None:
     """The caps are optional and change nothing below them, byte for byte."""
-    await client.call_tool("navigate", {"url": f"{flask_server}/evaluate", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/evaluate")
 
     assert await evaluate(client, PROFILE, "[1, 2, 3]") == "[1, 2, 3]"
     assert await evaluate(client, PROFILE, "({a: 1, b: 'x'})") == '{"a": 1, "b": "x"}'
@@ -67,7 +50,7 @@ async def test_evaluate_array_is_cut_at_the_item_boundary(
     client: Client, flask_server: str
 ) -> None:
     """The whole point of max_items: what comes back is still a parseable array."""
-    await client.call_tool("navigate", {"url": f"{flask_server}/evaluate", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/evaluate")
 
     body, note = _split(await evaluate(client, PROFILE, _MANY_ITEMS_JS))
 
@@ -79,9 +62,9 @@ async def test_evaluate_array_is_cut_at_the_item_boundary(
 
 
 async def test_evaluate_max_items_is_adjustable(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/evaluate", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/evaluate")
 
-    body, note = _split(await _capped(client, _MANY_ITEMS_JS, max_items=5))
+    body, note = _split(await capped(client, _MANY_ITEMS_JS, max_items=5))
 
     assert [item["i"] for item in json.loads(body)] == [0, 1, 2, 3, 4]
     assert note == "[truncated: showing 5 of 5341 items. Raise max_items to see more]"
@@ -91,7 +74,7 @@ async def test_evaluate_char_cap_also_cuts_an_array_at_the_item_boundary(
     client: Client, flask_server: str
 ) -> None:
     """50 items is under max_items, so only max_chars can bind, and it names itself."""
-    await client.call_tool("navigate", {"url": f"{flask_server}/evaluate", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/evaluate")
 
     body, note = _split(await evaluate(client, PROFILE, _FAT_ITEMS_JS))
 
@@ -102,7 +85,7 @@ async def test_evaluate_char_cap_also_cuts_an_array_at_the_item_boundary(
 
 
 async def test_evaluate_string_is_cut_at_max_chars(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/evaluate", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/evaluate")
 
     body, note = _split(await evaluate(client, PROFILE, _BIG_STRING_JS))
 
@@ -114,19 +97,19 @@ async def test_evaluate_string_is_cut_at_max_chars(client: Client, flask_server:
 
 
 async def test_evaluate_caps_can_be_disabled(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/evaluate", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/evaluate")
 
-    result = await _capped(client, _BIG_STRING_JS, max_chars=0)
+    result = await capped(client, _BIG_STRING_JS, max_chars=0)
 
     assert len(result) == 50002
     assert "truncated" not in result
 
 
 async def test_evaluate_caps_apply_on_the_uid_path(client: Client, flask_server: str) -> None:
-    (uid,) = await _uids(client, flask_server, "Click me")
+    (uid,) = await uids_for_labels(client, flask_server, "Click me")
 
     body, note = _split(
-        await _evaluate_uids(client, "(el) => Array.from({length: 5341}, (_, i) => i)", [uid])
+        await evaluate_uids(client, "(el) => Array.from({length: 5341}, (_, i) => i)", [uid])
     )
 
     assert json.loads(body) == list(range(200))
@@ -135,7 +118,7 @@ async def test_evaluate_caps_apply_on_the_uid_path(client: Client, flask_server:
 
 async def test_evaluate_dom_node_is_named_not_rendered(client: Client, flask_server: str) -> None:
     """Measured: the driver returns the literal text 'ref: <Node>' and raises nothing."""
-    await client.call_tool("navigate", {"url": f"{flask_server}/evaluate", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/evaluate")
 
     result = await evaluate(client, PROFILE, "document.body")
 
@@ -145,7 +128,7 @@ async def test_evaluate_dom_node_is_named_not_rendered(client: Client, flask_ser
 
 
 async def test_evaluate_nested_dom_node_names_its_path(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/evaluate", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/evaluate")
 
     result = await evaluate(client, PROFILE, "({ok: 1, el: document.body})")
 
@@ -154,7 +137,7 @@ async def test_evaluate_nested_dom_node_names_its_path(client: Client, flask_ser
 
 async def test_evaluate_circular_result_is_named(client: Client, flask_server: str) -> None:
     """Measured: the driver rebuilds the cycle in Python, where json.dumps refuses it."""
-    await client.call_tool("navigate", {"url": f"{flask_server}/evaluate", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/evaluate")
 
     result = await evaluate(client, PROFILE, _CIRCULAR_JS)
 

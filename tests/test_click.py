@@ -3,15 +3,22 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from tests.helpers import PROFILE, evaluate, extract_uid, goto_and_find, text_content, tool_text
+from tests.helpers import (
+    BIG_TEXT_JS,
+    OBSERVATION_SNAPSHOT_MARK,
+    OBSERVATION_TEXT_MARK,
+    PROFILE,
+    RENDERED_STALE_UID,
+    evaluate,
+    extract_uid,
+    goto_and_find,
+    open_page,
+    text_content,
+    tool_text,
+)
 
 if TYPE_CHECKING:
     from fastmcp import Client
-
-# Grows the page body innerText past the 4000-char observe=text cap.
-_BIG_TEXT_JS = (
-    "document.body.insertAdjacentHTML('beforeend', '<p>' + 'x'.repeat(5000) + '</p>'); 'ok'"
-)
 
 
 async def test_single_click(client: Client, flask_server: str) -> None:
@@ -48,16 +55,21 @@ async def test_click_counter(client: Client, flask_server: str) -> None:
 
 
 async def test_click_invalid_uid(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/click")
     result = tool_text(await client.call_tool("click", {"profile": PROFILE, "uid": "e99999"}))
-    assert "error" in result.lower()
-    assert "stale uid" in result.lower()
+    assert result == RENDERED_STALE_UID.format(uid="e99999"), result
 
 
 async def test_click_bad_uid_format(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": PROFILE})
+    """A uid that is not even shaped like one gets the same contract string.
+
+    ``"error" in result.lower()`` accepted any failure at all, including a browser
+    crash, so it never established that the tool answered the one thing an agent
+    knows how to act on.
+    """
+    await open_page(client, f"{flask_server}/click")
     result = tool_text(await client.call_tool("click", {"profile": PROFILE, "uid": "invalid"}))
-    assert "error" in result.lower()
+    assert result == RENDERED_STALE_UID.format(uid="invalid"), result
 
 
 async def test_click_plain_uid_output_unchanged(client: Client, flask_server: str) -> None:
@@ -70,7 +82,7 @@ async def test_click_plain_uid_output_unchanged(client: Client, flask_server: st
 
 
 async def test_click_by_selector(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/click")
 
     result = tool_text(
         await client.call_tool("click", {"profile": PROFILE, "selector": "#btn-single"})
@@ -83,7 +95,7 @@ async def test_click_by_selector(client: Client, flask_server: str) -> None:
 
 
 async def test_click_selector_both_errors(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/click")
     result = tool_text(
         await client.call_tool(
             "click", {"profile": PROFILE, "uid": "e0", "selector": "#btn-single"}
@@ -94,7 +106,7 @@ async def test_click_selector_both_errors(client: Client, flask_server: str) -> 
 
 
 async def test_click_selector_neither_errors(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/click")
     result = tool_text(await client.call_tool("click", {"profile": PROFILE}))
     assert "error" in result.lower()
     assert "exactly one of uid or selector" in result.lower()
@@ -107,7 +119,7 @@ async def test_click_observe_snapshot_yields_usable_uids(client: Client, flask_s
         await client.call_tool("click", {"profile": PROFILE, "uid": uid, "observe": "snapshot"})
     )
     assert "clicked" in result.lower()
-    assert "--- observation (snapshot) ---" in result
+    assert OBSERVATION_SNAPSHOT_MARK in result
 
     # A uid taken from the fresh observation must drive a follow-up click.
     counter_uid = extract_uid(result, "Count clicks")
@@ -120,13 +132,13 @@ async def test_click_observe_snapshot_yields_usable_uids(client: Client, flask_s
 
 async def test_click_observe_text_truncates(client: Client, flask_server: str) -> None:
     uid = await goto_and_find(client, f"{flask_server}/click", PROFILE, "Click me")
-    await evaluate(client, PROFILE, _BIG_TEXT_JS)
+    await evaluate(client, PROFILE, BIG_TEXT_JS)
 
     result = tool_text(
         await client.call_tool("click", {"profile": PROFILE, "uid": uid, "observe": "text"})
     )
     assert "clicked" in result.lower()
-    assert "--- observation (text) ---" in result
+    assert OBSERVATION_TEXT_MARK in result
     assert "[truncated" in result
     # 5000 'x' were injected; the 4000-char cap keeps a long-but-partial run, so
     # a big contiguous block survives while the full 5000 never does.

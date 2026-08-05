@@ -6,33 +6,19 @@ value of this tool is what the model receives as text, not what a helper returns
 
 from __future__ import annotations
 
-import json
-import re
 from typing import TYPE_CHECKING
 
-from tests.helpers import PROFILE, evaluate, extract_uid, text_content, tool_text
+from tests.helpers import (
+    PROFILE,
+    RENDERED_STALE_UID,
+    evaluate,
+    extract_uid,
+    open_page,
+    tool_text,
+)
 
 if TYPE_CHECKING:
     from fastmcp import Client
-
-_BOX = re.compile(r"^x=-?\d+ y=-?\d+ w=(\d+) h=(\d+) center=\((-?\d+), (-?\d+)\)$")
-
-# A button far below the fold, plus the viewport height to judge the answer against.
-# It reports what it was clicked with, so a coordinate that reaches nothing is not
-# mistaken for a coordinate that reached the button.
-_ADD_DEEP_BUTTON_JS = """
-(() => {
-  const spacer = document.createElement('div');
-  spacer.style.height = '4000px';
-  document.body.appendChild(spacer);
-  const deep = document.createElement('button');
-  deep.id = 'deep-buy';
-  deep.textContent = 'Buy deep';
-  deep.addEventListener('click', () => { deep.textContent = 'Bought deep'; });
-  document.body.appendChild(deep);
-  return window.innerHeight;
-})()
-"""
 
 # Three matches for one selector, the middle one of a kind that has no text to read.
 _ADD_MIXED_MATCHES_JS = """
@@ -48,16 +34,12 @@ _ADD_MIXED_MATCHES_JS = """
 """
 
 
-async def _open(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/get-element", "profile": PROFILE})
-
-
 async def _get(client: Client, **args: object) -> str:
     return tool_text(await client.call_tool("get_element", {"profile": PROFILE, **args}))
 
 
 async def test_text_reads_the_rendered_text(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     assert await _get(client, selector="#intro", prop="text") == (
         "Everything you need to know about this product."
@@ -67,7 +49,7 @@ async def test_text_reads_the_rendered_text(client: Client, flask_server: str) -
 
 
 async def test_text_is_capped_at_max_chars(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     result = await _get(client, selector="#long", prop="text", max_chars=40)
 
@@ -77,7 +59,7 @@ async def test_text_is_capped_at_max_chars(client: Client, flask_server: str) ->
 
 
 async def test_value_reads_what_a_field_holds(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     assert await _get(client, selector="#email", prop="value") == "user@example.com"
     assert await _get(client, selector="#notes", prop="value") == "Deliver before noon"
@@ -86,7 +68,7 @@ async def test_value_reads_what_a_field_holds(client: Client, flask_server: str)
 
 async def test_value_follows_a_fill_through_a_uid(client: Client, flask_server: str) -> None:
     """The empty field reads as empty, then reports exactly what fill typed into it."""
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
     found = tool_text(await client.call_tool("find", {"profile": PROFILE, "css": "#blank"}))
     uid = extract_uid(found, "Nickname")
 
@@ -97,7 +79,7 @@ async def test_value_follows_a_fill_through_a_uid(client: Client, flask_server: 
 
 
 async def test_value_on_a_div_names_the_tag(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     result = await _get(client, selector="#plain", prop="value")
 
@@ -105,7 +87,7 @@ async def test_value_on_a_div_names_the_tag(client: Client, flask_server: str) -
 
 
 async def test_text_on_an_input_points_at_value(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     result = await _get(client, selector="#email", prop="text")
 
@@ -115,14 +97,14 @@ async def test_text_on_an_input_points_at_value(client: Client, flask_server: st
 
 
 async def test_attribute_reads_a_named_attribute(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     assert await _get(client, selector="#link", prop="attribute", name="href") == "/click"
     assert await _get(client, selector="#link", prop="attribute", name="data-role") == "nav"
 
 
 async def test_absent_attribute_is_not_an_empty_string(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     result = await _get(client, selector="#link", prop="attribute", name="data-missing")
 
@@ -130,7 +112,7 @@ async def test_absent_attribute_is_not_an_empty_string(client: Client, flask_ser
 
 
 async def test_attribute_requires_a_name(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     result = await _get(client, selector="#link", prop="attribute")
 
@@ -138,7 +120,7 @@ async def test_attribute_requires_a_name(client: Client, flask_server: str) -> N
 
 
 async def test_state_reports_the_four_flags(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     assert await _get(client, selector="#locked", prop="state") == (
         "visible=true enabled=false checked=n/a editable=false"
@@ -151,53 +133,11 @@ async def test_state_reports_the_four_flags(client: Client, flask_server: str) -
     )
 
 
-async def test_box_is_usable_as_click_at_coordinates(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
-
-    result = await _get(client, selector="#locked", prop="box")
-
-    match = _BOX.fullmatch(result)
-    assert match, result
-    width, height, center_x, center_y = (int(group) for group in match.groups())
-    assert width > 0 and height > 0
-    clicked = tool_text(
-        await client.call_tool("click_at", {"profile": PROFILE, "x": center_x, "y": center_y})
-    )
-    assert clicked.startswith("Clicked at")
-
-
-async def test_box_below_the_fold_is_a_point_click_at_can_reach(
-    client: Client, flask_server: str
-) -> None:
-    """The advertised chain, on the case that used to break it silently.
-
-    A box measured where the element sits in the document names a point outside the
-    viewport, and `click_at` then reports success having clicked nothing at all. The
-    element has to be scrolled into view before it is measured for either half of
-    the chain to mean anything.
-    """
-    await _open(client, flask_server)
-    height = int(json.loads(await evaluate(client, PROFILE, _ADD_DEEP_BUTTON_JS)))
-
-    result = await _get(client, selector="#deep-buy", prop="box")
-
-    match = _BOX.fullmatch(result)
-    assert match, result
-    _, _, center_x, center_y = (int(group) for group in match.groups())
-    assert 0 <= center_y <= height, f"center y {center_y} is outside a {height}px viewport"
-    clicked = tool_text(
-        await client.call_tool("click_at", {"profile": PROFILE, "x": center_x, "y": center_y})
-    )
-    assert clicked.startswith("Clicked at"), clicked
-    landed = await text_content(client, PROFILE, "deep-buy")
-    assert json.loads(landed) == "Bought deep", landed
-
-
 async def test_a_match_without_the_property_is_a_note_not_a_dead_end(
     client: Client, flask_server: str
 ) -> None:
     """One match that cannot answer must not delete the answers of the others."""
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
     assert await evaluate(client, PROFILE, _ADD_MIXED_MATCHES_JS) == "1"
 
     result = await _get(client, selector=".mixed", prop="text", limit=3)
@@ -211,7 +151,7 @@ async def test_a_match_without_the_property_is_a_note_not_a_dead_end(
 
 
 async def test_style_reads_a_computed_property(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     result = await _get(client, selector="#styled", prop="style", name="color")
 
@@ -219,7 +159,7 @@ async def test_style_reads_a_computed_property(client: Client, flask_server: str
 
 
 async def test_style_rejects_an_unknown_property(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     result = await _get(client, selector="#styled", prop="style", name="colour")
 
@@ -227,14 +167,14 @@ async def test_style_rejects_an_unknown_property(client: Client, flask_server: s
 
 
 async def test_count_returns_the_number_of_matches(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     assert await _get(client, selector="button.buy", prop="count") == "3"
     assert await _get(client, selector="#nowhere", prop="count") == "0"
 
 
 async def test_count_refuses_a_uid(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     result = await _get(client, uid="e1", prop="count")
 
@@ -242,7 +182,7 @@ async def test_count_refuses_a_uid(client: Client, flask_server: str) -> None:
 
 
 async def test_one_of_several_matches_says_so(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     result = await _get(client, selector="button.buy", prop="text")
 
@@ -250,7 +190,7 @@ async def test_one_of_several_matches_says_so(client: Client, flask_server: str)
 
 
 async def test_limit_numbers_every_match(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     result = await _get(client, selector="button.buy", prop="text", limit=3)
 
@@ -258,7 +198,7 @@ async def test_limit_numbers_every_match(client: Client, flask_server: str) -> N
 
 
 async def test_no_match_says_what_was_searched(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     result = await _get(client, selector="#nowhere", prop="text")
 
@@ -266,15 +206,15 @@ async def test_no_match_says_what_was_searched(client: Client, flask_server: str
 
 
 async def test_stale_uid_asks_for_a_new_snapshot(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     result = await _get(client, uid="e999", prop="text")
 
-    assert result == "Error: ValueError: unknown or stale uid 'e999'; take a new snapshot"
+    assert result == RENDERED_STALE_UID.format(uid="e999")
 
 
 async def test_targeting_needs_exactly_one_address(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
     expected = "Error: ValueError: provide exactly one of uid or selector"
 
     assert await _get(client, uid="e1", selector="#intro", prop="text") == expected
@@ -282,7 +222,7 @@ async def test_targeting_needs_exactly_one_address(client: Client, flask_server:
 
 
 async def test_an_unknown_prop_lists_the_supported_ones(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_page(client, f"{flask_server}/get-element")
 
     result = await _get(client, selector="#intro", prop="html")
 

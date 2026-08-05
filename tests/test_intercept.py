@@ -10,26 +10,47 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.helpers import PROFILE, evaluate, extract_uid, text_content, tool_text
+from tests.helpers import (
+    PROFILE,
+    evaluate,
+    extract_uid,
+    open_and_snapshot,
+    open_page,
+    snapshot_text,
+    text_content,
+    tool_text,
+)
 
 if TYPE_CHECKING:
     from fastmcp import Client
 
 SHOW_BANNER_JS = "document.getElementById('veil').style.display = 'block'"
-HIDE_LATER_JS = (
-    "(() => { const b = document.getElementById('veil'); "
-    "b.style.display = 'block'; "
-    "setTimeout(() => { b.style.display = 'none'; }, 800); return 1; })()"
-)
+# The veil comes down on the click's OWN first hit test, instead of on a timer racing
+# it. 00_boot.js captures `Document.prototype.elementsFromPoint` when the store first
+# runs, and 50_geometry.js `hitTest` is the only caller, so a wrapper installed before
+# the first snapshot counts exactly the probes and can hide the veil between two of
+# them. A timer here decided the outcome by machine speed: fire before the click
+# starts probing and the retry path is never exercised, while the test still passes.
+HIDE_ON_FIRST_HIT_TEST_JS = """
+(() => {
+  window.__blockedProbes = 0;
+  const veil = document.getElementById('veil');
+  const original = Document.prototype.elementsFromPoint;
+  Document.prototype.elementsFromPoint = function (x, y) {
+    const stack = original.call(this, x, y);
+    if (veil.style.display === 'block') {
+      window.__blockedProbes++;
+      veil.style.display = 'none';
+    }
+    return stack;
+  };
+  return 1;
+})()
+"""
 GHOST_BANNER_JS = (
     "(() => { const b = document.getElementById('veil'); "
     "b.style.display = 'block'; b.style.pointerEvents = 'none'; return 1; })()"
 )
-
-
-async def _open(client: Client, flask_server: str) -> str:
-    await client.call_tool("navigate", {"url": f"{flask_server}/overlay", "profile": PROFILE})
-    return tool_text(await client.call_tool("snapshot", {"profile": PROFILE}))
 
 
 async def _click(client: Client, uid: str) -> str:
@@ -39,7 +60,7 @@ async def _click(client: Client, uid: str) -> str:
 async def test_click_under_fixed_overlay_reports_the_interceptor(
     client: Client, flask_server: str
 ) -> None:
-    snap = await _open(client, flask_server)
+    snap = await open_and_snapshot(client, f"{flask_server}/overlay")
     uid = extract_uid(snap, "Target")
     await evaluate(client, PROFILE, SHOW_BANNER_JS)
 
@@ -55,7 +76,7 @@ async def test_click_under_fixed_overlay_reports_the_interceptor(
 async def test_click_succeeds_once_the_overlay_is_dismissed(
     client: Client, flask_server: str
 ) -> None:
-    snap = await _open(client, flask_server)
+    snap = await open_and_snapshot(client, f"{flask_server}/overlay")
     uid = extract_uid(snap, "Target")
     await evaluate(client, PROFILE, SHOW_BANNER_JS)
 
@@ -69,21 +90,36 @@ async def test_click_succeeds_once_the_overlay_is_dismissed(
 
 
 async def test_click_waits_out_a_disappearing_overlay(client: Client, flask_server: str) -> None:
-    """The poll retries interception; failing on the first probe would be wrong."""
-    snap = await _open(client, flask_server)
+    """The poll retries interception; failing on the first probe would be wrong.
+
+    The overlay is taken down by the click's own first hit test, so the click is
+    guaranteed to meet it once and can only succeed on a later probe. One probe
+    taken while the veil was up is the proof the retry ran, which the removed
+    800 ms timer hoped for rather than established.
+    """
+    await open_page(client, f"{flask_server}/overlay")
+    assert await evaluate(client, PROFILE, HIDE_ON_FIRST_HIT_TEST_JS) == "1"
+    snap = await snapshot_text(client)
     uid = extract_uid(snap, "Target")
-    await evaluate(client, PROFILE, HIDE_LATER_JS)
+    assert await evaluate(client, PROFILE, "window.__blockedProbes") == "0", "the walk hit tests"
+    await evaluate(client, PROFILE, SHOW_BANNER_JS)
 
     result = await _click(client, uid)
 
     assert result.startswith("Clicked <button>"), result
     assert "target clicked" in await text_content(client, PROFILE, "click-output")
+    blocked = int(await evaluate(client, PROFILE, "window.__blockedProbes"))
+    assert blocked == 1, (
+        f"{blocked} hit test(s) met the overlay, so the click never had to wait it out: "
+        "either the retry is gone, or the hit test no longer goes through "
+        "elementsFromPoint and this test has to be re-anchored on whatever it probes now"
+    )
 
 
 async def test_pointer_events_none_overlay_does_not_intercept(
     client: Client, flask_server: str
 ) -> None:
-    snap = await _open(client, flask_server)
+    snap = await open_and_snapshot(client, f"{flask_server}/overlay")
     uid = extract_uid(snap, "Target")
     await evaluate(client, PROFILE, GHOST_BANNER_JS)
 
@@ -92,7 +128,7 @@ async def test_pointer_events_none_overlay_does_not_intercept(
 
 
 async def test_span_inside_button_is_not_an_interception(client: Client, flask_server: str) -> None:
-    snap = await _open(client, flask_server)
+    snap = await open_and_snapshot(client, f"{flask_server}/overlay")
     uid = extract_uid(snap, "Send")
 
     assert (await _click(client, uid)).startswith("Clicked <button>")
@@ -101,7 +137,7 @@ async def test_span_inside_button_is_not_an_interception(client: Client, flask_s
 
 async def test_label_over_input_is_not_an_interception(client: Client, flask_server: str) -> None:
     """The label covers its own checkbox, and clicking it is what activates it."""
-    snap = await _open(client, flask_server)
+    snap = await open_and_snapshot(client, f"{flask_server}/overlay")
     uid = extract_uid(snap, "Accept terms")
 
     assert (await _click(client, uid)).startswith("Clicked <input>")
@@ -109,7 +145,7 @@ async def test_label_over_input_is_not_an_interception(client: Client, flask_ser
 
 
 async def test_zero_size_is_not_reported_as_stale(client: Client, flask_server: str) -> None:
-    snap = await _open(client, flask_server)
+    snap = await open_and_snapshot(client, f"{flask_server}/overlay")
     uid = extract_uid(snap, "Shrink me")
     await evaluate(
         client,
@@ -126,7 +162,7 @@ async def test_zero_size_is_not_reported_as_stale(client: Client, flask_server: 
 
 
 async def test_offscreen_element_reports_its_own_error(client: Client, flask_server: str) -> None:
-    snap = await _open(client, flask_server)
+    snap = await open_and_snapshot(client, f"{flask_server}/overlay")
     uid = extract_uid(snap, "Clipped away")
 
     result = await _click(client, uid)

@@ -10,16 +10,12 @@ from tests.helpers import evaluate, tool_text
 if TYPE_CHECKING:
     from fastmcp import Client
 
+# The 3 values the assertions below read, and nothing else: a field nobody looks at
+# is a page contract this suite pretends to hold and does not.
 EXTRACT_JS = """
 (function() {
-    const g = id => (document.getElementById(id) || {}).textContent || '';
     return {
-        detectedOS: g('detected-os'),
-        confidence: g('os-confidence'),
-        score: g('score'),
-        grade: g('grade'),
-        errorCount: g('error-count'),
-        warningCount: g('warning-count'),
+        detectedOS: (document.getElementById('detected-os') || {}).textContent || '',
         userAgent: navigator.userAgent,
         platform: navigator.platform,
     };

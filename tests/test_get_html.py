@@ -2,17 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.helpers import PROFILE, evaluate, tool_text
+from tests.helpers import BIG_TEXT_JS, PROFILE, evaluate, open_page, tool_text
 
 if TYPE_CHECKING:
     from fastmcp import Client
 
 _MARKER = "SCRIPT_MARKER_SHOULD_BE_STRIPPED"
-
-# Grows the page body innerText past the 4000-char observe=text cap.
-_BIG_TEXT_JS = (
-    "document.body.insertAdjacentHTML('beforeend', '<p>' + 'x'.repeat(5000) + '</p>'); 'ok'"
-)
 
 
 async def _get_html(client: Client, **kwargs: object) -> str:
@@ -20,7 +15,7 @@ async def _get_html(client: Client, **kwargs: object) -> str:
 
 
 async def test_get_html_full_document_default(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/get-html", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/get-html")
 
     out = await _get_html(client)
 
@@ -34,7 +29,7 @@ async def test_get_html_full_document_default(client: Client, flask_server: str)
 
 
 async def test_get_html_keep_scripts(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/get-html", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/get-html")
 
     out = await _get_html(client, strip_scripts=False)
 
@@ -43,7 +38,7 @@ async def test_get_html_keep_scripts(client: Client, flask_server: str) -> None:
 
 
 async def test_get_html_selector_scope(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/get-html", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/get-html")
 
     out = await _get_html(client, selector="#main-article")
 
@@ -56,7 +51,7 @@ async def test_get_html_selector_scope(client: Client, flask_server: str) -> Non
 
 
 async def test_get_html_text_mode_selector(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/get-html", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/get-html")
 
     out = await _get_html(client, selector="#lead", mode="text")
 
@@ -67,7 +62,7 @@ async def test_get_html_text_mode_selector(client: Client, flask_server: str) ->
 
 
 async def test_get_html_no_match_selector(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/get-html", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/get-html")
 
     out = await _get_html(client, selector="#does-not-exist")
 
@@ -75,7 +70,7 @@ async def test_get_html_no_match_selector(client: Client, flask_server: str) -> 
 
 
 async def test_get_html_invalid_mode(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/get-html", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/get-html")
 
     out = await _get_html(client, mode="markdown")
 
@@ -91,7 +86,7 @@ async def test_get_html_truncation(client: Client, flask_server: str) -> None:
     total, so an approximate total is a wrong total, and it can only act at all if
     the note names a parameter it can actually pass.
     """
-    await client.call_tool("navigate", {"url": f"{flask_server}/get-html", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/get-html")
 
     full = await _get_html(client, max_chars=0)
     out = await _get_html(client, max_chars=50)
@@ -109,8 +104,8 @@ async def test_observation_truncation_points_at_get_html(client: Client, flask_s
     caller to: the assertion that matters is that the advice is reachable, not that
     it is well worded, so it ends by fetching what the observation had to drop.
     """
-    await client.call_tool("navigate", {"url": f"{flask_server}/get-html", "profile": PROFILE})
-    await evaluate(client, PROFILE, _BIG_TEXT_JS)
+    await open_page(client, f"{flask_server}/get-html")
+    await evaluate(client, PROFILE, BIG_TEXT_JS)
 
     result = tool_text(
         await client.call_tool("click_at", {"profile": PROFILE, "x": 5, "y": 5, "observe": "text"})
@@ -124,7 +119,7 @@ async def test_observation_truncation_points_at_get_html(client: Client, flask_s
 
 
 async def test_get_html_unlimited(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/get-html", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/get-html")
 
     out = await _get_html(client, max_chars=0)
 

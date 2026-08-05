@@ -14,28 +14,27 @@ is refused everywhere else.
 from __future__ import annotations
 
 import asyncio
-import re
 from typing import TYPE_CHECKING
 
-from tests.helpers import PROFILE, evaluate, extract_uid, text_content, tool_text
+from tests.helpers import (
+    PROFILE,
+    RENDERED_STALE_UID,
+    evaluate,
+    extract_uid,
+    open_and_snapshot,
+    snapshot_text,
+    text_content,
+    tool_text,
+    uids,
+)
+from tests.waits import poll_tool_until
 
 if TYPE_CHECKING:
     from fastmcp import Client
 
-STALE = "Error: ValueError: unknown or stale uid '{uid}'; take a new snapshot"
-
-
-async def _snapshot(client: Client) -> str:
-    return tool_text(await client.call_tool("snapshot", {"profile": PROFILE}))
-
-
-async def _open(client: Client, flask_server: str) -> str:
-    await client.call_tool("navigate", {"url": f"{flask_server}/identity", "profile": PROFILE})
-    return await _snapshot(client)
-
 
 async def test_uid_survives_dom_mutation_around_it(client: Client, flask_server: str) -> None:
-    snap = await _open(client, flask_server)
+    snap = await open_and_snapshot(client, f"{flask_server}/identity")
     uid = extract_uid(snap, "Target row")
 
     await evaluate(
@@ -46,7 +45,7 @@ async def test_uid_survives_dom_mutation_around_it(client: Client, flask_server:
         "b.textContent = 'Filler ' + i; rows.insertBefore(b, rows.firstChild); } return 50; })()",
     )
 
-    again = await _snapshot(client)
+    again = await snapshot_text(client)
     assert extract_uid(again, "Target row") == uid
 
     result = tool_text(await client.call_tool("click", {"profile": PROFILE, "uid": uid}))
@@ -57,7 +56,7 @@ async def test_uid_survives_dom_mutation_around_it(client: Client, flask_server:
 async def test_recycled_uid_cannot_act_on_the_wrong_element(
     client: Client, flask_server: str
 ) -> None:
-    snap = await _open(client, flask_server)
+    snap = await open_and_snapshot(client, f"{flask_server}/identity")
     uid = extract_uid(snap, "Target row")
 
     await evaluate(
@@ -68,16 +67,16 @@ async def test_recycled_uid_cannot_act_on_the_wrong_element(
         "for (let i = 0; i < 3; i++) { const b = document.createElement('button'); "
         "b.textContent = 'Replacement ' + i; rows.appendChild(b); } return 3; })()",
     )
-    await _snapshot(client)
+    await snapshot_text(client)
 
     result = tool_text(await client.call_tool("click", {"profile": PROFILE, "uid": uid}))
-    assert result == STALE.format(uid=uid)
+    assert result == RENDERED_STALE_UID.format(uid=uid)
     assert "nothing clicked" in await text_content(client, PROFILE, "click-output")
 
 
 async def test_new_element_gets_a_new_number(client: Client, flask_server: str) -> None:
-    snap = await _open(client, flask_server)
-    known = set(_uids(snap))
+    snap = await open_and_snapshot(client, f"{flask_server}/identity")
+    known = set(uids(snap))
 
     await evaluate(
         client,
@@ -86,7 +85,7 @@ async def test_new_element_gets_a_new_number(client: Client, flask_server: str) 
         "b.textContent = 'Fresh row'; document.getElementById('rows').appendChild(b); return 1; })()",
     )
 
-    again = await _snapshot(client)
+    again = await snapshot_text(client)
     assert extract_uid(again, "Fresh row") not in known
 
 
@@ -97,17 +96,17 @@ async def test_navigation_starts_a_new_uid_range(client: Client, flask_server: s
     different element after a navigation, so the ranges are asserted directly and not
     only through the wrong-element consequence below.
     """
-    snap = await _open(client, flask_server)
-    before = set(_uids(snap))
+    snap = await open_and_snapshot(client, f"{flask_server}/identity")
+    before = set(uids(snap))
 
     await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": PROFILE})
-    fresh = set(_uids(await _snapshot(client)))
+    fresh = set(uids(await snapshot_text(client)))
 
     assert before and fresh
     assert fresh.isdisjoint(before)
     beyond = f"e{max(int(uid[1:]) for uid in fresh) + 500}"
     result = tool_text(await client.call_tool("click", {"profile": PROFILE, "uid": beyond}))
-    assert result == STALE.format(uid=beyond)
+    assert result == RENDERED_STALE_UID.format(uid=beyond)
 
 
 async def test_uid_from_the_previous_document_is_refused(client: Client, flask_server: str) -> None:
@@ -117,14 +116,14 @@ async def test_uid_from_the_previous_document_is_refused(client: Client, flask_s
     next page and the tool answered ``Clicked <button>``, a wrong element reported as
     a success.
     """
-    snap = await _open(client, flask_server)
+    snap = await open_and_snapshot(client, f"{flask_server}/identity")
     uid = extract_uid(snap, "Target row")
 
     await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": PROFILE})
-    fresh = await _snapshot(client)
+    fresh = await snapshot_text(client)
 
     result = tool_text(await client.call_tool("click", {"profile": PROFILE, "uid": uid}))
-    assert result == STALE.format(uid=uid)
+    assert result == RENDERED_STALE_UID.format(uid=uid)
     assert "No click yet" in await text_content(client, PROFILE, "click-output")
 
     # The document is not broken, only that uid: its own uid for a button works.
@@ -142,14 +141,14 @@ async def test_uid_from_another_tab_is_refused(client: Client, flask_server: str
     on tab B and click it, which is the silent wrong-element failure this scheme
     exists to close.
     """
-    snap = await _open(client, flask_server)
+    snap = await open_and_snapshot(client, f"{flask_server}/identity")
     uid = extract_uid(snap, "Target row")
 
     await client.call_tool("new_page", {"profile": PROFILE, "url": f"{flask_server}/identity"})
-    other = await _snapshot(client)
+    other = await snapshot_text(client)
 
     result = tool_text(await client.call_tool("click", {"profile": PROFILE, "uid": uid}))
-    assert result == STALE.format(uid=uid)
+    assert result == RENDERED_STALE_UID.format(uid=uid)
     assert "nothing clicked" in await text_content(client, PROFILE, "click-output")
 
     # The tab is not broken, only that uid: its own uid for the same element works.
@@ -162,12 +161,12 @@ async def test_uid_from_another_tab_is_refused(client: Client, flask_server: str
 
 async def test_same_document_navigation_preserves_uids(client: Client, flask_server: str) -> None:
     """A pushState keeps the execution context alive, so it must keep the uids too."""
-    snap = await _open(client, flask_server)
+    snap = await open_and_snapshot(client, f"{flask_server}/identity")
     uid = extract_uid(snap, "Target row")
 
     await evaluate(client, PROFILE, "history.pushState({}, '', '/identity?step=2')")
 
-    again = await _snapshot(client)
+    again = await snapshot_text(client)
     assert extract_uid(again, "Target row") == uid
     assert tool_text(await client.call_tool("click", {"profile": PROFILE, "uid": uid})).startswith(
         "Clicked <button>"
@@ -176,11 +175,11 @@ async def test_same_document_navigation_preserves_uids(client: Client, flask_ser
 
 async def test_stale_uid_message_is_exact(client: Client, flask_server: str) -> None:
     """Every uid consumer renders the mandated string byte for byte."""
-    snap = await _open(client, flask_server)
+    snap = await open_and_snapshot(client, f"{flask_server}/identity")
     uid = extract_uid(snap, "Target row")
     await evaluate(client, PROFILE, "document.getElementById('target-btn').remove()")
 
-    expected = STALE.format(uid=uid)
+    expected = RENDERED_STALE_UID.format(uid=uid)
     calls = [
         ("click", {"profile": PROFILE, "uid": uid}),
         ("fill", {"profile": PROFILE, "uid": uid, "value": "x"}),
@@ -202,7 +201,7 @@ async def test_navigation_midflight_yields_the_mandated_string(
     client: Client, flask_server: str
 ) -> None:
     """A fill racing a navigation must never surface a raw context-destroyed message."""
-    snap = await _open(client, flask_server)
+    snap = await open_and_snapshot(client, f"{flask_server}/identity")
     uid = extract_uid(snap, "Target row")
 
     fill, _ = await asyncio.gather(
@@ -222,15 +221,23 @@ async def test_closed_page_is_not_reported_as_stale(client: Client, flask_server
     """
     await client.call_tool("navigate", {"url": f"{flask_server}/identity", "profile": PROFILE})
     await client.call_tool("new_page", {"profile": PROFILE, "url": f"{flask_server}/identity"})
-    snap = await _snapshot(client)
+    snap = await snapshot_text(client)
     uid = extract_uid(snap, "Target row")
 
     await evaluate(client, PROFILE, "window.close()")
+    # The close crosses the protocol asynchronously. Clicking while the tab is still
+    # alive is an ordinary successful click, so the mapping under test would never be
+    # exercised and the test would pass having proved nothing. Probe the tab until it
+    # stops answering: that is the precondition, and the click below is the assertion.
+    await poll_tool_until(
+        client,
+        "evaluate",
+        {"profile": PROFILE, "script": "1"},
+        lambda text: "TargetClosedError" in text,
+        describe="the closed tab never stopped answering evaluate",
+    )
+
     result = tool_text(await client.call_tool("click", {"profile": PROFILE, "uid": uid}))
 
     assert result.startswith("Error: TargetClosedError:")
     assert "take a new snapshot" not in result
-
-
-def _uids(snapshot: str) -> list[str]:
-    return re.findall(r"\be\d+\b", snapshot)

@@ -68,7 +68,6 @@ async def test_tool_payload_within_budget(client: Client) -> None:
         + ", ".join(f"{name} {size}" for name, size in breakdown.items())
         + f", structural_chars {structural}"
     )
-    print(report)
     assert len(blob) <= budget, f"{report}. Read {BASELINE_PATH.name} before changing it."
 
 

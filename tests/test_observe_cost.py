@@ -15,13 +15,15 @@ import re
 from typing import TYPE_CHECKING
 
 from camoufox_mcp.tools._observe import OBSERVE_MAX_CHARS, VALID_OBSERVE
-from tests.helpers import PROFILE, tool_text
+from tests.helpers import (
+    OBSERVATION_SNAPSHOT_MARK,
+    OBSERVATION_TEXT_MARK,
+    PROFILE,
+    tool_text,
+)
 
 if TYPE_CHECKING:
     from fastmcp import Client
-
-_SNAPSHOT_MARK = "--- observation (snapshot) ---"
-_TEXT_MARK = "--- observation (text) ---"
 
 # The product's one truncation note: what came back, what exists, and the next call.
 _NOTE = re.compile(r"^\[truncated: showing (\d+) of (\d+) chars\. (.+)\]$")
@@ -78,7 +80,7 @@ async def test_snapshot_observation_is_capped_and_says_what_it_did(
 
     bare = await _navigate(client, url, "none")
     observed = await _navigate(client, url, "snapshot")
-    block = _block(observed, _SNAPSHOT_MARK)
+    block = _block(observed, OBSERVATION_SNAPSHOT_MARK)
     body, note = _split_note(block)
 
     shown, total, advice = int(note.group(1)), int(note.group(2)), note.group(3)
@@ -92,11 +94,11 @@ async def test_snapshot_observation_is_capped_and_says_what_it_did(
     assert _SNAPSHOT_LINE.match(last_line), f"the cut landed mid-line: {last_line!r}"
 
     full = tool_text(await client.call_tool("snapshot", {"profile": PROFILE}))
-    print(
-        f"navigate observe=none {len(bare)} chars, observe=snapshot {len(observed)} chars "
-        f"(observation {len(block)} of {total} available), snapshot tool {len(full)} chars"
+    assert len(block) < len(full) / 4, (
+        "the observation is not meaningfully cheaper than snapshot: navigate observe=none "
+        f"{len(bare)} chars, observe=snapshot {len(observed)} chars (observation {len(block)} "
+        f"of {total} available), snapshot tool {len(full)} chars"
     )
-    assert len(block) < len(full) / 4, "the observation is not meaningfully cheaper than snapshot"
 
 
 async def test_the_last_uid_of_a_truncated_observation_still_resolves(
@@ -104,7 +106,7 @@ async def test_the_last_uid_of_a_truncated_observation_still_resolves(
 ) -> None:
     """A uid from the trailing edge of the cut must be a real uid, not a fragment."""
     observed = await _navigate(client, f"{flask_server}/selector-large", "snapshot")
-    body, _ = _split_note(_block(observed, _SNAPSHOT_MARK))
+    body, _ = _split_note(_block(observed, OBSERVATION_SNAPSHOT_MARK))
 
     match = _SNAPSHOT_LINE.match(body.splitlines()[-1])
     assert match is not None
@@ -121,7 +123,7 @@ async def test_text_observation_is_capped_on_the_same_page(
 ) -> None:
     """The text mode was already capped, and now shares the number with snapshot."""
     observed = await _navigate(client, f"{flask_server}/selector-large", "text")
-    body, note = _split_note(_block(observed, _TEXT_MARK))
+    body, note = _split_note(_block(observed, OBSERVATION_TEXT_MARK))
 
     assert int(note.group(1)) == len(body) == OBSERVE_MAX_CHARS
     assert int(note.group(2)) > OBSERVE_MAX_CHARS
@@ -131,7 +133,7 @@ async def test_text_observation_is_capped_on_the_same_page(
 async def test_a_small_page_is_observed_whole(client: Client, flask_server: str) -> None:
     """The cap must not truncate an ordinary page: nothing to say, so it says nothing."""
     observed = await _navigate(client, f"{flask_server}/click", "snapshot")
-    block = _block(observed, _SNAPSHOT_MARK)
+    block = _block(observed, OBSERVATION_SNAPSHOT_MARK)
 
     assert "[truncated" not in block, block[-300:]
     assert _SNAPSHOT_LINE.search(block), "the observation carries no uid line at all"

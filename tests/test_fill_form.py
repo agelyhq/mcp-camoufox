@@ -54,7 +54,9 @@ async def test_fill_form_malformed_entry(client: Client, flask_server: str) -> N
             {"profile": PROFILE, "fields": [{"uid": first}]},
         )
     )
-    assert "error" in result.lower()
+    # The index is the whole point: out of a 6-field call, "error" somewhere in the
+    # string leaves the caller retrying them one at a time to find the bad one.
+    assert result == "Error: ValueError: field 0 needs 'uid' and 'value'", result
 
 
 async def test_fill_form_handles_a_checkbox(client: Client, flask_server: str) -> None:

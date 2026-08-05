@@ -29,7 +29,6 @@ from tests.daemon_harness import (
     Harness,
     assert_hardened,
     daemon_session,
-    force_teardown,
     rmtree_retry,
 )
 from tests.helpers import isolate_camoufox_env
@@ -56,30 +55,35 @@ def _long_data_dir(root: Path) -> Path:
     return root.joinpath(*_LONG_TAIL)
 
 
-def test_long_data_dir_still_starts_the_daemon(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A data dir too deep for sun_path must not stop the daemon from binding."""
-    runtime_dir = Path(tempfile.mkdtemp(prefix="cfxr-"))
-    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime_dir))
-    data_dir = _long_data_dir(tmp_path)
-    isolate_camoufox_env(monkeypatch, data_dir, CAMOUFOX_DAEMON_TTL="60")
+@pytest.fixture
+def long_daemon_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Harness]:
+    """A daemon whose data dir is too deep for ``sun_path`` to hold its socket."""
+    yield from daemon_session(monkeypatch, _long_data_dir(tmp_path))
 
+
+@pytest.fixture
+def runtime_dir(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """A throwaway XDG_RUNTIME_DIR, removed however the test ends."""
+    directory = Path(tempfile.mkdtemp(prefix="cfxr-"))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(directory))
+    try:
+        yield directory
+    finally:
+        rmtree_retry(directory)
+
+
+def test_long_data_dir_still_starts_the_daemon(long_daemon_env: Harness, runtime_dir: Path) -> None:
+    """A data dir too deep for sun_path must not stop the daemon from binding."""
     cfg = ServerConfig.from_env()
     assert len(str(paths.socket_path(cfg))) > MAX_SOCKET_PATH_BYTES, "data dir not long enough"
-    harness = Harness(cfg)
-    try:
-        ensure_daemon(cfg, ENDPOINT)
 
-        health = probe_health(cfg, ENDPOINT)
-        assert health is not None
-        assert local_identity(cfg).matches(health)
-        assert daemon_socket_path(cfg).is_relative_to(runtime_dir)
-        assert_hardened(cfg)
-    finally:
-        force_teardown(harness)
-        rmtree_retry(data_dir)
-        rmtree_retry(runtime_dir)
+    ensure_daemon(cfg, ENDPOINT)
+
+    health = probe_health(cfg, ENDPOINT)
+    assert health is not None
+    assert local_identity(cfg).matches(health)
+    assert daemon_socket_path(cfg).is_relative_to(runtime_dir)
+    assert_hardened(cfg)
 
 
 def test_socket_over_the_limit_raises_a_typed_error(
@@ -110,30 +114,25 @@ def test_socket_falls_back_to_the_data_dir_without_a_runtime_dir(
 
 
 def test_a_proxy_without_a_runtime_dir_finds_the_running_daemon(
-    daemon_env: Harness, monkeypatch: pytest.MonkeyPatch
+    daemon_env: Harness, runtime_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Processes that disagree about XDG_RUNTIME_DIR must still share one daemon."""
-    runtime_dir = Path(tempfile.mkdtemp(prefix="cfxr-"))
-    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime_dir))
     cfg = ServerConfig.from_env()
-    try:
-        ensure_daemon(cfg, ENDPOINT)
-        started = probe_health(cfg, ENDPOINT)
-        assert started is not None
-        daemon_env.track(int(started["pid"]))
+    ensure_daemon(cfg, ENDPOINT)
+    started = probe_health(cfg, ENDPOINT)
+    assert started is not None
+    daemon_env.track(int(started["pid"]))
 
-        # A second process, same data dir, no runtime dir in its environment: it
-        # derives its own config, which is where the runtime dir is now read.
-        monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
-        other = ServerConfig.from_env()
-        assert daemon_socket_path(other) != published_socket_path(other)
+    # A second process, same data dir, no runtime dir in its environment: it
+    # derives its own config, which is where the runtime dir is now read.
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    other = ServerConfig.from_env()
+    assert daemon_socket_path(other) != published_socket_path(other)
 
-        found = probe_health(other, ENDPOINT)
-        assert found is not None, "the pointer in the data dir did not lead to the daemon"
-        ensure_daemon(other, ENDPOINT)
-        assert probe_health(other, ENDPOINT)["pid"] == started["pid"], "a second daemon was spawned"
-    finally:
-        rmtree_retry(runtime_dir)
+    found = probe_health(other, ENDPOINT)
+    assert found is not None, "the pointer in the data dir did not lead to the daemon"
+    ensure_daemon(other, ENDPOINT)
+    assert probe_health(other, ENDPOINT)["pid"] == started["pid"], "a second daemon was spawned"
 
 
 def test_a_second_data_dir_gets_its_own_control_channel(

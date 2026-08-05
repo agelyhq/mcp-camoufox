@@ -15,13 +15,13 @@ would not.
 from __future__ import annotations
 
 import json
-import tempfile
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tests.helpers import PROFILE, evaluate, extract_uid, tool_text
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from fastmcp import Client
 
 # A contenteditable the probe page does not carry, so the getSelection/createRange
@@ -145,7 +145,7 @@ HOOK_CAPTURED_JS = """
 
 
 async def test_globals_replaced_after_boot_are_not_observed(
-    client: Client, flask_server: str
+    client: Client, tmp_path: Path, flask_server: str
 ) -> None:
     """A page that replaces these globals after boot counts nothing.
 
@@ -171,19 +171,15 @@ async def test_globals_replaced_after_boot_are_not_observed(
 
     assert await evaluate(client, PROFILE, HOOK_UNCAPTURED_JS) == "1"
 
-    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as handle:
-        handle.write(b"boundary")
-        upload = handle.name
-    try:
-        for name, args in (
-            ("fill", {"profile": PROFILE, "uid": select, "value": "Cherry"}),
-            ("fill", {"profile": PROFILE, "uid": rich, "value": "new text"}),
-            ("upload_file", {"profile": PROFILE, "uid": attachment, "file_path": upload}),
-        ):
-            result = tool_text(await client.call_tool(name, args))
-            assert not result.startswith(("Error:", "Timeout:")), f"{name}: {result}"
-    finally:
-        Path(upload).unlink(missing_ok=True)
+    upload = tmp_path / "boundary.txt"
+    upload.write_bytes(b"boundary")
+    for name, args in (
+        ("fill", {"profile": PROFILE, "uid": select, "value": "Cherry"}),
+        ("fill", {"profile": PROFILE, "uid": rich, "value": "new text"}),
+        ("upload_file", {"profile": PROFILE, "uid": attachment, "file_path": str(upload)}),
+    ):
+        result = tool_text(await client.call_tool(name, args))
+        assert not result.startswith(("Error:", "Timeout:")), f"{name}: {result}"
 
     seen = json.loads(await evaluate(client, PROFILE, "window.__b"))
     assert seen == [], f"the page observed our calls through replaced globals: {seen}"

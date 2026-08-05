@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import base64
+import io
 import json
 import re
+import time
 from typing import TYPE_CHECKING
 
 from fastmcp import Client
+from PIL import Image as PILImage
 
 from tests.helpers import extract_uid, tool_text
 
@@ -26,7 +30,9 @@ def _read_last_record(log_file: Path) -> dict:
 
 
 async def test_tool_call_appends_jsonl(client: Client, flask_server: str, data_dir: Path) -> None:
+    call_started = time.perf_counter()
     await client.call_tool("navigate", {"url": f"{flask_server}/", "profile": "telem"})
+    call_ms = (time.perf_counter() - call_started) * 1000
 
     log_file = data_dir / "logs" / "telem.jsonl"
     assert log_file.exists(), "expected a per-profile telemetry log"
@@ -37,7 +43,11 @@ async def test_tool_call_appends_jsonl(client: Client, flask_server: str, data_d
     assert isinstance(record["args"], dict)
     assert record["args"].get("url") == f"{flask_server}/"
     assert isinstance(record["duration_ms"], (int, float))
-    assert record["duration_ms"] >= 0
+    # ">= 0" cannot fail: the field is a monotonic delta. The real claim is that it
+    # times the tool body, so it has to fit inside the call the test just made. This
+    # is a containment check against this run's own measurement, not a threshold on
+    # how fast the machine is: a slower machine grows both sides.
+    assert 0 <= record["duration_ms"] <= call_ms, f"{record['duration_ms']} vs {call_ms} ms"
     assert record["ok"] is True
     assert record["error"] is None
     # The record carries what the caller was told, verbatim. A truthiness check on
@@ -87,18 +97,18 @@ async def test_success_and_intent_enrichment(
     navs = [r for r in records if r["tool"] == "navigate"]
     evals = [r for r in records if r["tool"] == "evaluate"]
 
-    # --- Item 3 (result_chars) + Item 12 (url) on a successful call ---
+    # --- result_chars and url on a successful call ---
     nav_ok = navs[0]
     assert nav_ok["ok"] is True
     assert isinstance(nav_ok["result_chars"], int)
     assert nav_ok["result_chars"] == len(nav_ok["result"])  # short result is not truncated
     assert isinstance(nav_ok["url"], str) and nav_ok["url"].startswith("http")
-    # Item 11 fields are evaluate-only and must never appear on other tools.
+    # The intent fields are evaluate-only and must never appear on other tools.
     assert "intent" not in nav_ok
     assert "script_hash" not in nav_ok
     assert "script_len" not in nav_ok
 
-    # --- Item 11 (evaluate intent analytics) ---
+    # --- evaluate intent analytics: bucket, script fingerprint and length ---
     read_rec = evals[0]
     assert read_rec["intent"] == "read"
     assert isinstance(read_rec["script_hash"], str) and len(read_rec["script_hash"]) == 12
@@ -110,7 +120,7 @@ async def test_success_and_intent_enrichment(
     assert click_rec["intent"] == "click"
     assert click_rec["ok"] is False
 
-    # --- Item 2 (error rendering) on the failed navigation ---
+    # --- one-line error rendering on the failed navigation ---
     nav_err = navs[1]
     assert nav_err["ok"] is False
     note = nav_err["result"]
@@ -196,14 +206,20 @@ async def test_close_session_on_idle_profile_emits_nothing(client: Client, data_
 
 async def test_screenshot_image_metrics(client: Client, flask_server: str, data_dir: Path) -> None:
     await client.call_tool("navigate", {"url": f"{flask_server}/screenshot", "profile": "shot"})
-    await client.call_tool("screenshot", {"profile": "shot"})
+    shot = await client.call_tool("screenshot", {"profile": "shot"})
+
+    # "> 0" cannot fail on a PNG, which forbids a zero dimension. The record is worth
+    # something only if it describes the image the caller actually received, so the
+    # image is decoded here and the record is compared against it.
+    png = base64.b64decode(shot.content[0].data)
+    with PILImage.open(io.BytesIO(png)) as img:
+        sent_w, sent_h = img.size
 
     record = _read_last_record(data_dir / "logs" / "shot.jsonl")
     assert record["tool"] == "screenshot"
     assert record["ok"] is True
-    assert isinstance(record["img_w"], int) and record["img_w"] > 0
-    assert isinstance(record["img_h"], int) and record["img_h"] > 0
-    assert isinstance(record["img_bytes"], int) and record["img_bytes"] > 100
+    assert (record["img_w"], record["img_h"]) == (sent_w, sent_h)
+    assert record["img_bytes"] == len(png)
     assert isinstance(record["est_image_tokens"], int)
     assert 0 < record["est_image_tokens"] <= 1568
     # An image-only result carries no character count and a placeholder note.
@@ -214,7 +230,7 @@ async def test_screenshot_image_metrics(client: Client, flask_server: str, data_
 async def test_intercepted_click_is_greppable(
     client: Client, flask_server: str, data_dir: Path
 ) -> None:
-    """Issue 9 gets its own class so a covered click is measurable in the JSONL."""
+    """A covered click carries its own error class, so it is countable in the JSONL."""
     profile = "telem_intercept"
     await client.call_tool("navigate", {"url": f"{flask_server}/overlay", "profile": profile})
     snap = tool_text(await client.call_tool("snapshot", {"profile": profile}))

@@ -9,7 +9,15 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from tests.helpers import PROFILE, evaluate, extract_uid, text_content, tool_text
+from tests.helpers import (
+    PROFILE,
+    evaluate,
+    extract_uid,
+    open_and_snapshot,
+    open_page,
+    text_content,
+    tool_text,
+)
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -52,22 +60,13 @@ _ADD_MANY_SAVE_BUTTONS_JS = """
 """
 
 
-async def _goto(client: Client, flask_server: str, path: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}{path}", "profile": PROFILE})
-
-
-async def _open(client: Client, flask_server: str, path: str = "/click") -> str:
-    await _goto(client, flask_server, path)
-    return tool_text(await client.call_tool("snapshot", {"profile": PROFILE}))
-
-
 async def _find(client: Client, **filters: object) -> str:
     return tool_text(await client.call_tool("find", {"profile": PROFILE, **filters}))
 
 
 async def test_find_by_role_and_name(client: Client, flask_server: str) -> None:
     """The flagship query, and proof that locating an element does not act on it."""
-    await _open(client, flask_server)
+    await open_and_snapshot(client, f"{flask_server}/click")
 
     result = await _find(client, role="button", name="Count clicks")
 
@@ -78,7 +77,7 @@ async def test_find_by_role_and_name(client: Client, flask_server: str) -> None:
 
 
 async def test_find_uid_matches_the_snapshot_uid(client: Client, flask_server: str) -> None:
-    snap = await _open(client, flask_server)
+    snap = await open_and_snapshot(client, f"{flask_server}/click")
 
     result = await _find(client, css="#btn-counter")
 
@@ -87,7 +86,7 @@ async def test_find_uid_matches_the_snapshot_uid(client: Client, flask_server: s
 
 async def test_find_uid_is_actionable(client: Client, flask_server: str) -> None:
     """A uid minted by find drives a click without any snapshot in between."""
-    await _goto(client, flask_server, "/click")
+    await open_page(client, f"{flask_server}/click")
 
     result = await _find(client, text="Count clicks", role="button")
     uid = extract_uid(result, "Count clicks")
@@ -100,7 +99,7 @@ async def test_find_uid_is_actionable(client: Client, flask_server: str) -> None
 
 async def test_find_uid_fills_without_a_snapshot(client: Client, flask_server: str) -> None:
     """The same uid feeds `fill`, which resolves it through the same table."""
-    await _goto(client, flask_server, "/find")
+    await open_page(client, f"{flask_server}/find")
 
     result = await _find(client, label="Email address")
     uid = extract_uid(result, "Email address")
@@ -114,7 +113,7 @@ async def test_find_uid_fills_without_a_snapshot(client: Client, flask_server: s
 
 
 async def test_find_by_label_placeholder_and_test_id(client: Client, flask_server: str) -> None:
-    await _goto(client, flask_server, "/find")
+    await open_page(client, f"{flask_server}/find")
 
     labelled = await _find(client, label="Email address")
     held = await _find(client, placeholder="search")
@@ -132,7 +131,7 @@ async def test_find_by_label_placeholder_and_test_id(client: Client, flask_serve
 
 
 async def test_find_by_text_lists_every_match(client: Client, flask_server: str) -> None:
-    await _goto(client, flask_server, "/find")
+    await open_page(client, f"{flask_server}/find")
 
     result = await _find(client, text="Add to cart")
 
@@ -144,7 +143,7 @@ async def test_find_by_text_lists_every_match(client: Client, flask_server: str)
 
 
 async def test_find_exact_narrows_to_the_whole_name(client: Client, flask_server: str) -> None:
-    await _goto(client, flask_server, "/find")
+    await open_page(client, f"{flask_server}/find")
 
     loose = await _find(client, text="Add to cart")
     strict = await _find(client, text="Add to cart", exact=True)
@@ -167,7 +166,7 @@ async def test_exact_keeps_every_name_that_ends_in_brackets(
     bracketed group. Telling the two apart by looking at the line is guesswork, and
     the guess used to drop the button that was actually usable.
     """
-    await _goto(client, flask_server, "/find")
+    await open_page(client, f"{flask_server}/find")
     assert await evaluate(client, PROFILE, _ADD_BRACKETED_NAMES_JS) == "1"
 
     result = await _find(client, name="Save (draft)", exact=True)
@@ -183,7 +182,7 @@ async def test_exact_refuses_a_name_that_only_starts_with_the_value(
     client: Client, flask_server: str
 ) -> None:
     """`Save (draft)` is not `Save`, however alike the two rendered lines look."""
-    await _goto(client, flask_server, "/find")
+    await open_page(client, f"{flask_server}/find")
     assert await evaluate(client, PROFILE, _ADD_BRACKETED_NAMES_JS) == "1"
 
     result = await _find(client, name="Save", exact=True)
@@ -196,7 +195,7 @@ async def test_exact_refuses_a_name_that_only_starts_with_the_value(
 async def test_exact_matches_a_name_that_is_only_brackets(
     client: Client, flask_server: str
 ) -> None:
-    await _goto(client, flask_server, "/find")
+    await open_page(client, f"{flask_server}/find")
     assert await evaluate(client, PROFILE, _ADD_BRACKET_ONLY_NAME_JS) == "1"
 
     result = await _find(client, text="(new)", exact=True)
@@ -210,7 +209,7 @@ async def test_exact_marks_a_total_it_could_not_finish_counting(
     client: Client, flask_server: str
 ) -> None:
     """Past the scan the total is a floor, and it says so rather than inventing one."""
-    await _goto(client, flask_server, "/find")
+    await open_page(client, f"{flask_server}/find")
     assert await evaluate(client, PROFILE, _ADD_MANY_SAVE_BUTTONS_JS) == "1"
 
     result = await _find(client, name="Save", exact=True, limit=3)
@@ -222,7 +221,7 @@ async def test_exact_marks_a_total_it_could_not_finish_counting(
 
 async def test_find_names_what_the_role_matched(client: Client, flask_server: str) -> None:
     """The not-found report lists what the query actually saw, typo included."""
-    await _goto(client, flask_server, "/find")
+    await open_page(client, f"{flask_server}/find")
 
     result = await _find(client, role="heading", name="Skillz")
 
@@ -234,7 +233,7 @@ async def test_find_names_what_the_role_matched(client: Client, flask_server: st
 async def test_find_reports_the_criteria_when_nothing_matches(
     client: Client, flask_server: str
 ) -> None:
-    await _goto(client, flask_server, "/find")
+    await open_page(client, f"{flask_server}/find")
 
     result = await _find(client, role="slider", name="Volume")
 
@@ -242,7 +241,7 @@ async def test_find_reports_the_criteria_when_nothing_matches(
 
 
 async def test_find_states_the_total_beyond_the_limit(client: Client, flask_server: str) -> None:
-    await _goto(client, flask_server, "/find")
+    await open_page(client, f"{flask_server}/find")
 
     result = await _find(client, role="button", limit=2)
 
@@ -251,7 +250,7 @@ async def test_find_states_the_total_beyond_the_limit(client: Client, flask_serv
 
 
 async def test_find_rejects_two_candidate_sources(client: Client, flask_server: str) -> None:
-    await _goto(client, flask_server, "/find")
+    await open_page(client, f"{flask_server}/find")
 
     clash = await _find(client, css="button", test_id="checkout-button")
     duplicate = await _find(client, name="Email", label="Email address")
@@ -266,7 +265,7 @@ async def test_find_rejects_two_candidate_sources(client: Client, flask_server: 
 
 
 async def test_find_requires_a_filter(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_and_snapshot(client, f"{flask_server}/click")
 
     result = await _find(client)
 
@@ -277,7 +276,7 @@ async def test_find_requires_a_filter(client: Client, flask_server: str) -> None
 
 
 async def test_find_honours_the_limit(client: Client, flask_server: str) -> None:
-    await _open(client, flask_server)
+    await open_and_snapshot(client, f"{flask_server}/click")
 
     result = await _find(client, role="button", limit=2)
 

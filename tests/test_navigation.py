@@ -3,7 +3,12 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from tests.helpers import PROFILE, tool_text
+from tests.helpers import (
+    OBSERVATION_SNAPSHOT_MARK,
+    OBSERVATION_TEXT_MARK,
+    PROFILE,
+    tool_text,
+)
 
 if TYPE_CHECKING:
     import pytest
@@ -52,8 +57,8 @@ async def test_navigate_observe_snapshot(client: Client, flask_server: str) -> N
         )
     )
     assert "Navigated to" in result
-    assert "--- observation (snapshot) ---" in result
-    _, _, block = result.partition("--- observation (snapshot) ---")
+    assert OBSERVATION_SNAPSHOT_MARK in result
+    _, _, block = result.partition(OBSERVATION_SNAPSHOT_MARK)
     assert re.search(r"e\d+", block), "snapshot observation must expose interactive uids"
 
 
@@ -65,7 +70,7 @@ async def test_navigate_observe_text(client: Client, flask_server: str) -> None:
         )
     )
     assert "Navigated to" in result
-    assert "--- observation (text) ---" in result
+    assert OBSERVATION_TEXT_MARK in result
     assert "Snapshot Test" in result  # page body innerText
 
 

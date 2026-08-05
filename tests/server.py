@@ -6,6 +6,8 @@ import time
 
 from flask import Flask, jsonify, render_template, request
 
+from tests.helpers import FLASK_PORT
+
 app = Flask(__name__)
 
 
@@ -255,4 +257,4 @@ def api_form():
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5123, debug=True)
+    app.run(host="127.0.0.1", port=FLASK_PORT, debug=True)

@@ -19,9 +19,8 @@ must survive that project's maintainer reading it.
 `src/camoufox_mcp/`: `server.py` (entrypoint), `bootstrap.py` (composition root, holds
 `SERVER_INSTRUCTIONS`), `config.py` (the only reader of `os.environ`), `updater.py`,
 `telemetry.py`, `profile_name.py`, `deadlines.py` (`bounded()`), then `sessions/`, `dom/`
-with its numbered `dom/js/`
-bundle, `tools/` (one file per tool), and the opt-in `daemon/`. File-by-file map in
-`docs/architecture.md`.
+with its numbered `dom/js/` bundle, `tools/` (one file per tool), and the opt-in
+`daemon/`. File-by-file map in `docs/architecture.md`.
 
 Dependencies point inward: `tools/` uses `sessions/` and `dom/`, which use `config.py`.
 `tools/` never touches Playwright except through `page.raw`.
@@ -48,7 +47,8 @@ differentiators, credits), never grows a reference section, and names no other p
   applies (the note carries the click_at multiplier). All others return `str`, never a raw
   Playwright object.
 - `from __future__ import annotations` everywhere; files under 300 lines (split, never
-  compress); profiles are local-disk only, never synced.
+  compress); profiles are local-disk only, never synced. Tests drive the public surface: a
+  seam a test needs is a public name, never a monkeypatched `_underscored` one.
 
 ## Conventions
 
@@ -126,24 +126,25 @@ differentiators, credits), never grows a reference section, and names no other p
 
 ## Build / lint / test
 
-`make install` (uv sync), `make lint` (ruff check + format --check, must exit 0),
-`make format`, `make test` (real Camoufox + local Flask, offline), `make run`.
-`.github/workflows/release.yml` publishes to PyPI on a version tag via OIDC; it is the
-only CI. `make lint` and `make test` are still run by hand before a release.
-The `tools/list` payload is budgeted in `tests/payload_baseline.json` and guarded by a
-test: anything added to the surface spends that margin.
+`make install`, `make lint` (must exit 0), `make format`, `make test` (real Camoufox plus a
+local Flask, offline), `make run`. The only CI is `.github/workflows/release.yml`: a version
+tag builds, refuses a tag disagreeing with the built version, runs the WHOLE suite on the
+runner, then publishes through OIDC behind a manual approval. Lint is not in it, it runs
+here. **No test may wait a duration before asserting**: wait for the appearance, with a
+deadline as the guardrail. Every poll goes through `tests/waits.py:poll_until`. Shared test
+code lives only in `tests/`: `helpers.py`, `waits.py`, `fakes.py`, `evaluate_helpers.py`,
+`daemon_harness.py`. The `tools/list` payload is budgeted in `tests/payload_baseline.json`.
 
 ## Out of scope
 
 CDP/V8-only capabilities (heap snapshots, Chrome tracing, Lighthouse, screencast,
 throttling), client-facing network transport (stdio only), cloud profile sync, session TTL,
-and iframe or shadow-root uids. Each is argued in `docs/decisions.md`: point at that file
-rather than re-litigating them in review.
+iframe and shadow-root uids. Each is argued in `docs/decisions.md`: point there rather than
+re-litigating it in review.
 
 ## License
 
 **FSL-1.1-MIT**, source-available, not open source. Never reintroduce plain-MIT wording in
 `LICENSE` or `pyproject.toml` (`license = "LicenseRef-FSL-1.1-MIT"`), and never drop
-`docs/CONTRIBUTING.md`, whose contributor grant is what keeps relicensing possible. The
-README carries no License section: it is a shop window, not a legal notice. Terms and
-rationale in `docs/decisions.md`.
+`docs/CONTRIBUTING.md`, whose contributor grant keeps relicensing possible. The README
+carries no License section: it is a shop window, not a legal notice.

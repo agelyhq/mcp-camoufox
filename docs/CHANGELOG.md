@@ -6,6 +6,39 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-05
+
+A release pipeline that runs the tests, and a suite that no longer measures the machine.
+
+### Changed
+
+- **Publishing now runs the whole test suite first.** 0.3.0 was uploaded on the word that
+  the suite passed locally: the workflow built and published without executing a single
+  test. It is now build, then the entire suite against a real browser on the runner, then
+  the upload behind a manual approval, each stage needing the one before it. The build also
+  refuses a tag that disagrees with the version inside the wheel, and `workflow_dispatch` is
+  gone, since it allowed publishing from any branch and emptied "tags only" of its meaning.
+- **No test waits a duration before asserting.** 6 assertions in this project measured how
+  fast a machine is rather than whether the code was right, and each cost a debugging cycle:
+  a latency compared against an absolute threshold, a 1 second sleep before checking a
+  captured request, an advert asserted gone the instant a process was reaped, 2 tools
+  compared on a page where neither actually waited, a race asserted to resolve the way the
+  product explicitly does not promise, and 1 that could not fail at all. Every wait is now a
+  poll for the condition being asserted, with a deadline only as a guardrail, through a
+  single `poll_until`. About 18 seconds of unconditional sleeping went with them.
+- Several tests were strengthened while being made deterministic rather than merely
+  stabilised: the network tests now target the request the action caused instead of
+  whichever landed first on the tab, the double-click test counts the events the page
+  received instead of matching a word in the result string, the infinite-scroll test waits
+  for the page to be quiescent so its baseline is a settled number, and 8 assertions of the
+  form "error appears somewhere in the output" now pin the exact one-line error.
+
+### Fixed
+
+- A duplicated block at the head of a test module shadowed its own helpers, so 3 functions
+  were defined twice and the first definition of each was dead.
+
+
 ### Fixed
 
 - `list_network_requests` and `list_console_messages` no longer go blank on a page that
@@ -348,7 +381,8 @@ backed by Camoufox, with per-profile session isolation.
 
 - The S3 profile sync stack. Profiles are local-disk only.
 
-[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/agelyhq/mcp-camoufox/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/agelyhq/mcp-camoufox/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/agelyhq/mcp-camoufox/releases/tag/v0.1.1

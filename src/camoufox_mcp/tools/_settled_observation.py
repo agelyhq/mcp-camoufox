@@ -26,7 +26,7 @@ _READY_BUDGET_MS = 1500
 # What the caller is told when the tab keeps navigating through both capture
 # attempts, a chain of redirects above all. Silence would be worse: it asked to be
 # shown the page and has to know it was not.
-_KEPT_MOVING = (
+KEPT_MOVING = (
     "\n\n[observation skipped: the page navigated again while it was being read; "
     "call snapshot for the page you have now]"
 )
@@ -60,7 +60,7 @@ async def settled_observation(page: Page, tool: str, mode: str | None) -> str:
     await _document_ready(page)
     at_capture = page.url
     block = await observe_suffix(page, mode)
-    return block if page.url == at_capture else _KEPT_MOVING
+    return block if page.url == at_capture else KEPT_MOVING
 
 
 async def _settled_document(page: Page, tool: str) -> None:
