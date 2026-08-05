@@ -49,6 +49,23 @@ document left behind, and a rotation driven by the tab's own navigations. Only t
 frame counts as one, since a page whose ad or captcha iframe navigates has not itself gone
 anywhere, and treating that as a navigation used to empty the live ring under the agent.
 
+Which entries a rotation retires is the monitor's decision, not the ring's, because the
+commit and the requests do not share a source: the document request and the sub-resources
+it leads to are announced by the browser's HTTP layer, the commit by the content process
+hosting the new document. A cold session's first navigation spawns that process, so on a
+loaded machine the commit lands after the page's own load-time fetch has been captured
+(measured here: 50 to 380 ms after, on 5 of 6 cold navigations under CPU contention).
+Retiring the whole ring then discarded requests belonging to the document the caller was
+asking about, and `list_network_requests` answered "No network requests captured." for a
+page whose fetch had already been answered 200. So the network monitor retires by entry
+id: everything recorded after a navigation's own document request was asked for by the
+document that request delivered, and the boundary is the FIRST document request since the
+last rotation, so a sub-frame navigating while the commit is in flight cannot push it past
+the main document's sub-resources. A navigation carrying no document request at all
+(`about:blank`, a `data:` URL, a same-document history move) retires the whole ring, and so
+does every console rotation: a message carries no evidence of its document, and needs none,
+since messages and commits are both announced by the content process.
+
 `Page.raw` is the single escape hatch to Playwright, and it is restricted to the surface
 verified to leave no trace in the page: `mouse`, `keyboard`, `screenshot`, `goto` and
 `wait_for_load_state`. Banned repo-wide: `locator()`, `query_selector`,

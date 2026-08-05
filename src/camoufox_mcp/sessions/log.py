@@ -13,6 +13,25 @@ if TYPE_CHECKING:
 MAX_ENTRIES = 1000
 
 
+def on_main_frame_navigation(page: Page, handler: Callable[[], object]) -> None:
+    """Call ``handler`` when THIS TAB's own document is replaced, and only then.
+
+    ``framenavigated`` fires for every frame in the tab, and a page carrying an ad, a
+    captcha or any embed navigates sub-frames of its own long after it has finished
+    loading. Treating one of those as a navigation moved the document's own entries into
+    the preserved ring and emptied the live one, so the default listing answered "No
+    network requests captured." on a page that had just loaded, and every in-flight
+    request stayed "pending" forever. Only the main frame carries the tab's document;
+    ``page.py``'s ``_on_loaded`` states the same reasoning for the element store.
+    """
+
+    def dispatch(frame: Frame) -> None:
+        if frame is frame.page.main_frame:
+            handler()
+
+    page.on("framenavigated", dispatch)
+
+
 class PreservingLog[T]:
     """A tab's bounded observation ring, rotated when its document is replaced.
 
@@ -24,17 +43,16 @@ class PreservingLog[T]:
     Reading is one contract for both monitors: :meth:`select` filters, paginates
     and reports the pre-pagination total, so a caller can always say how much it
     did not show.
+
+    Rotating is the monitor's decision, not this class's: whoever owns the entries is
+    the only one that can tell which of them the replaced document left behind. See
+    :meth:`rotate`.
     """
 
-    def __init__(self, on_rotate: Callable[[], None] | None = None) -> None:
+    def __init__(self) -> None:
         self._entries: deque[T] = deque(maxlen=MAX_ENTRIES)
         self._preserved: deque[T] = deque(maxlen=MAX_ENTRIES)
         self._next_id = 0
-        self._on_rotate = on_rotate
-
-    def attach(self, page: Page) -> None:
-        """Subscribe to the tab's navigations so the rings rotate with its document."""
-        page.on("framenavigated", self._on_navigation)
 
     def next_id(self) -> int:
         """The id of the next entry: unique per tab, monotonic across rotations."""
@@ -51,6 +69,29 @@ class PreservingLog[T]:
             if match(entry):
                 return entry
         return None
+
+    def rotate(self, retire: Callable[[T], bool] | None = None) -> list[T]:
+        """Move the retired entries to the preserved ring; return them, in order.
+
+        ``retire`` names the entries the replaced document left behind. ``None`` means
+        the whole live ring, which is the only answer available to a monitor whose
+        entries carry no evidence of which document they belong to.
+
+        Everything ``retire`` rejects STAYS LIVE. That is the point of the predicate:
+        the events feeding a ring and the event announcing the navigation do not share
+        a source, so entries belonging to the new document can already be in the ring
+        when this runs, and a wholesale rotation loses them.
+        """
+        kept: deque[T] = deque(maxlen=MAX_ENTRIES)
+        retired: list[T] = []
+        for entry in self._entries:
+            if retire is None or retire(entry):
+                retired.append(entry)
+            else:
+                kept.append(entry)
+        self._preserved.extend(retired)
+        self._entries = kept
+        return retired
 
     def select(
         self,
@@ -72,22 +113,3 @@ class PreservingLog[T]:
             start = page_idx * page_size
             source = source[start : start + page_size]
         return source, total
-
-    def _on_navigation(self, frame: Frame) -> None:
-        """Rotate the rings, but only when THIS TAB's own document is replaced.
-
-        ``framenavigated`` fires for every frame in the tab, and a page carrying an
-        ad, a captcha or any embed navigates sub-frames of its own long after it has
-        finished loading. Treating one of those as a navigation moved the document's
-        own entries into the preserved ring and emptied the live one, so the default
-        listing answered "No network requests captured." on a page that had just
-        loaded, and every in-flight request stayed "pending" forever. Only the main
-        frame carries the tab's document; ``page.py``'s ``_on_loaded`` states the same
-        reasoning for the element store.
-        """
-        if frame is not frame.page.main_frame:
-            return
-        self._preserved.extend(self._entries)
-        self._entries.clear()
-        if self._on_rotate is not None:
-            self._on_rotate()

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from camoufox_mcp.sessions.log import PreservingLog
+from camoufox_mcp.sessions.log import PreservingLog, on_main_frame_navigation
 
 if TYPE_CHECKING:
     from playwright.async_api import ConsoleMessage, Page
@@ -41,7 +41,10 @@ class ConsoleMonitor:
         would create further handles of our own accord.
         """
         page.on("console", self._on_console)
-        self._log.attach(page)
+        # A message carries no evidence of the document it came from, so a navigation
+        # retires the whole ring. It can afford to: console messages and the navigation
+        # itself are both announced by the content process, in that order.
+        on_main_frame_navigation(page, self._log.rotate)
 
     def _on_console(self, msg: ConsoleMessage) -> None:
         self._log.record(
