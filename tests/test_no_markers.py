@@ -1,35 +1,35 @@
 """The contract of the element-identity rewrite: the page cannot tell we were here.
 
-One session arms four probes on an inert page and then drives every uid-consuming
-path over it. Nothing may be written to the DOM, no branded event may be dispatched,
-no observer may be constructed in the page realm, and no listener may appear on
-window. A second test proves the probes themselves work, so a silently broken probe
+One session arms the probes of :mod:`tests.probes` on an inert page and then drives every
+uid-consuming path over it. Nothing may be written to the DOM, no branded event may be
+dispatched, no observer may be constructed in the page realm, and no listener may appear
+on window. A second test proves the probes themselves work, so a silently broken probe
 cannot pass everything.
 
-The claim is about what THIS server does, and one driver-level path sits outside it:
-page script that logs a DOM node makes the driver instantiate its injected script in
-that world, whether or not console output is captured here. That is not assumed, it
-is measured and pinned by the last test in this module, so the boundary moves only
-when someone notices.
-
-The server here runs with no browser extension: the default cookie blocker writes a
-class onto <html> of its own accord, and this module measures OUR footprint, not the
-browser's.
+The claim is about what THIS server does. The 2 other actors that can reach the page, the
+browser's own extension and the HTML parser, are dealt with where the probes are defined,
+so a record read here is ours or it is the browser's and named as such. The one
+driver-level artifact this server cannot prevent is pinned in
+:mod:`tests.test_driver_footprint`.
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.helpers import PROFILE, evaluate, extract_uid, open_page, server_for, tool_text
-from tests.waits import poll_until
+from tests.helpers import PROFILE, evaluate, extract_uid, open_page, tool_text
+from tests.probes import (
+    INTERCEPTOR_EVENTS,
+    arm_probes,
+    probe_server,
+    probes_after_the_leak_window,
+    probes_when,
+    touched,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
     from fastmcp import Client, FastMCP
@@ -37,71 +37,7 @@ if TYPE_CHECKING:
 
 @pytest.fixture
 def mcp_server(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> FastMCP:
-    return server_for(monkeypatch, data_dir, CAMOUFOX_ADDON_URLS="")
-
-
-# Armed AFTER navigation, so nothing it installs is wiped by a load. The test then
-# performs no further navigation.
-ARM_PROBES_JS = """
-(() => {
-  window.__p = { marks: [], attrs: [], listeners: [], mo: 0 };
-  document.addEventListener('__playwright_mark_target__', () => window.__p.marks.push('mark'), true);
-  document.addEventListener('__playwright_unmark_target__', () => window.__p.marks.push('unmark'), true);
-  const OrigMO = window.MutationObserver;
-  window.MutationObserver = function (cb) { window.__p.mo++; return new OrigMO(cb); };
-  new OrigMO((records) => {
-    records.forEach((r) => window.__p.attrs.push(r.type + ':' + (r.attributeName || '')));
-  }).observe(document.documentElement, { attributes: true, childList: true, subtree: true });
-  const add = EventTarget.prototype.addEventListener;
-  EventTarget.prototype.addEventListener = function (type, fn, opts) {
-    try { if (this === window) window.__p.listeners.push(String(type)); } catch (e) { /* ignore */ }
-    return add.call(this, type, fn, opts);
-  };
-  return 1;
-})()
-"""
-
-READ_PROBES_JS = "window.__p"
-
-# The capture-phase pointer set a driver's injected script installs on window.
-_INTERCEPTOR_EVENTS = ("pointerdown", "auxclick", "touchcancel")
-
-
-# A negative claim has no appearance to wait for: the assertions say nothing arrived.
-# This is the window in which a leak would have had to show up, so it is a detection
-# window and not a settle time. It can only fail open, which is stated here because a
-# slower runner weakens the claim rather than breaking the run.
-_LEAK_WINDOW_S = 0.8
-# Bound on the positive waits below. The effect is asynchronous, so the loop stops on
-# the effect; the assertion that follows stays the verdict.
-_PROBE_DEADLINE_S = 10.0
-_PROBE_INTERVAL_S = 0.1
-
-
-async def _read_probes(client: Client) -> dict:
-    return json.loads(await evaluate(client, PROFILE, READ_PROBES_JS))
-
-
-async def _probes_after_the_leak_window(client: Client) -> dict:
-    """The probe tally read once the detection window above has fully elapsed."""
-    await asyncio.sleep(_LEAK_WINDOW_S)
-    return await _read_probes(client)
-
-
-async def _probes_when(client: Client, accept: Callable[[dict], bool]) -> dict:
-    """Re-read the probes until ``accept`` holds, or the deadline runs out.
-
-    Expiry is deliberately not an error: every caller asserts the effect it waited
-    for on the value returned, so the assertion stays the verdict and keeps its own
-    message as the diagnostic. The deadline only stops the loop.
-    """
-    probes, _ = await poll_until(
-        lambda: _read_probes(client),
-        accept,
-        deadline=_PROBE_DEADLINE_S,
-        interval=_PROBE_INTERVAL_S,
-    )
-    return probes
+    return probe_server(monkeypatch, data_dir)
 
 
 async def _drive_every_uid_path(client: Client, upload: str) -> None:
@@ -149,19 +85,24 @@ async def test_no_markers_on_any_uid_path(
     client: Client, tmp_path: Path, flask_server: str
 ) -> None:
     await open_page(client, f"{flask_server}/probe")
-    assert await evaluate(client, PROFILE, ARM_PROBES_JS) == "1"
+    await arm_probes(client)
 
     upload = tmp_path / "marker-free.txt"
     upload.write_bytes(b"marker free upload")
     await _drive_every_uid_path(client, str(upload))
 
-    probes = await _probes_after_the_leak_window(client)
+    probes = await probes_after_the_leak_window(client)
 
     assert probes["marks"] == [], "a target-marking event reached the page"
-    assert probes["attrs"] == [], f"the page recorded mutations: {probes['attrs']}"
+    # The tallies below ride along: this assertion is the one that has fired on a runner,
+    # and the 2 after it never got to say whether they were clean.
+    assert probes["mutations"] == [], (
+        f"the page recorded mutations: {probes['mutations']} "
+        f"(mo={probes['mo']}, listeners={probes['listeners']})"
+    )
     assert probes["mo"] == 0, "a MutationObserver was constructed in the page realm"
     assert not any("__playwright_global_listeners_check__" in t for t in probes["listeners"])
-    assert all(t not in probes["listeners"] for t in _INTERCEPTOR_EVENTS), probes["listeners"]
+    assert all(t not in probes["listeners"] for t in INTERCEPTOR_EVENTS), probes["listeners"]
 
     assert (
         await evaluate(client, PROFILE, "document.querySelectorAll('[data-mcp-uid]').length") == "0"
@@ -178,7 +119,7 @@ async def test_no_markers_on_any_uid_path(
 async def test_probe_instruments_actually_detect(client: Client, flask_server: str) -> None:
     """Control: without this, a silently broken probe would pass every assertion."""
     await open_page(client, f"{flask_server}/probe")
-    assert await evaluate(client, PROFILE, ARM_PROBES_JS) == "1"
+    await arm_probes(client)
 
     await evaluate(
         client,
@@ -194,17 +135,17 @@ async def test_probe_instruments_actually_detect(client: Client, flask_server: s
         "})()",
     )
 
-    probes = await _probes_when(
+    probes = await probes_when(
         client,
         lambda p: (
             p["marks"] == ["mark"]
-            and "attributes:data-touched" in p["attrs"]
+            and touched(p)
             and p["mo"] == 1
             and "pointerdown" in p["listeners"]
         ),
     )
     assert probes["marks"] == ["mark"]
-    assert "attributes:data-touched" in probes["attrs"]
+    assert touched(probes), probes["mutations"]
     assert probes["mo"] == 1
     assert "pointerdown" in probes["listeners"]
 
@@ -226,50 +167,3 @@ async def test_no_dom_residue(client: Client, flask_server: str) -> None:
 
     html = tool_text(await client.call_tool("get_html", {"profile": PROFILE}))
     assert "data-mcp-uid" not in html
-
-
-LOG_STRING_JS = "(() => { console.log('plain string'); return 1; })()"
-LOG_NODE_JS = "(() => { console.log(document.body); return 1; })()"
-
-
-async def test_node_valued_console_argument_forces_the_driver_injected_script(
-    client: Client, flask_server: str
-) -> None:
-    """The one page-visible artifact this server cannot prevent, pinned on purpose.
-
-    When page script logs a DOM node, the Firefox driver builds an element handle for
-    that argument inside its own console handler (coreBundle.js:43478 ``_onConsole``
-    -> :42843 ``createHandle3`` -> :16039 the ``ElementHandle`` constructor), and the
-    constructor evaluates the driver's injected script into the world the node lives
-    in, which installs its branded listener set on window. The handles are built while
-    calling ``addConsoleMessage`` (:19925), which only afterwards checks whether anyone
-    subscribed, so dropping this server's console capture changes nothing. There is no
-    supported client-side switch for it.
-
-    Logging a string on the same page is the control, so neither half of this can pass
-    by accident. If the node case ever stops leaking, this test fails: that is the
-    signal to tighten the invariant above and the wording in the docs.
-    """
-    await open_page(client, f"{flask_server}/probe")
-    assert await evaluate(client, PROFILE, ARM_PROBES_JS) == "1"
-
-    assert await evaluate(client, PROFILE, LOG_STRING_JS) == "1"
-    control = await _probes_after_the_leak_window(client)
-    assert control["listeners"] == [], f"a string argument leaked: {control['listeners']}"
-    assert control["mo"] == 0
-
-    assert await evaluate(client, PROFILE, LOG_NODE_JS) == "1"
-    probes = await _probes_when(
-        client,
-        lambda p: (
-            any("__playwright_global_listeners_check__" in t for t in p["listeners"])
-            and all(t in p["listeners"] for t in _INTERCEPTOR_EVENTS)
-            and p["mo"] == 1
-        ),
-    )
-    assert any("__playwright_global_listeners_check__" in t for t in probes["listeners"]), (
-        "the driver no longer instantiates its injected script for a node-valued "
-        f"console argument: tighten the invariant and the docs. Got {probes['listeners']}"
-    )
-    assert all(t in probes["listeners"] for t in _INTERCEPTOR_EVENTS), probes["listeners"]
-    assert probes["mo"] == 1, probes["mo"]
