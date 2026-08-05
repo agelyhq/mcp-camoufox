@@ -10,14 +10,16 @@ from fastmcp.server.providers.proxy import (
 )
 
 from camoufox_mcp.bootstrap import SERVER_INSTRUCTIONS, SERVER_NAME
-from camoufox_mcp.daemon.endpoint import ENDPOINT
+from camoufox_mcp.daemon.endpoint import select_endpoint
 from camoufox_mcp.daemon.errors import DaemonSpawnError
+from camoufox_mcp.daemon.recovery import DaemonRecovery, DaemonRecoveryMiddleware
 from camoufox_mcp.daemon.spawn import ensure_daemon
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
     from camoufox_mcp.config import ServerConfig
+    from camoufox_mcp.daemon.endpoint import DaemonEndpoint
 
 _CACHE_TTL_ATTR = "_cache_ttl"
 
@@ -32,26 +34,32 @@ class ProxyCacheError(RuntimeError):
 
 
 def run_proxy(config: ServerConfig) -> None:
-    """Ensure the shared daemon is up, then serve stdio by proxying to it."""
-    ensure_daemon(config)
-    build_proxy(config).run(transport="stdio")
+    """Ensure the shared daemon is up, then serve stdio by proxying to it.
+
+    The proxy's composition root: the platform control-channel strategy is built here,
+    once, and handed to everything that reaches the daemon.
+    """
+    endpoint = select_endpoint()
+    ensure_daemon(config, endpoint)
+    build_proxy(config, endpoint).run(transport="stdio")
 
 
-def build_proxy(config: ServerConfig) -> FastMCP:
+def build_proxy(config: ServerConfig, endpoint: DaemonEndpoint) -> FastMCP:
     """A stdio FastMCP proxy forwarding to the daemon's control channel.
 
     One persistent backend session per downstream stdio connection
-    (:class:`StatefulProxyClient`), and tool-list caching disabled so a freshly
-    started proxy never serves a stale tool list after a daemon code reload. The
-    transport (Unix socket on POSIX, authenticated loopback on Windows) is supplied
-    by the platform :data:`ENDPOINT`.
+    (:class:`StatefulProxyClient`), tool-list caching disabled so a freshly started
+    proxy never serves a stale tool list after a daemon code reload, and a recovery
+    middleware that respawns a daemon which dies mid-conversation. The transport
+    (Unix socket on POSIX, authenticated loopback on Windows) is supplied by the
+    injected ``endpoint``.
     """
-    conn = ENDPOINT.resolve(config)
+    conn = endpoint.resolve(config)
     if conn is None:
         raise DaemonSpawnError("daemon endpoint disappeared after ensure_daemon")
     transport = StreamableHttpTransport(
-        ENDPOINT.mcp_url(conn),
-        httpx_client_factory=ENDPOINT.mcp_client_factory(conn),
+        endpoint.mcp_url(conn),
+        httpx_client_factory=endpoint.mcp_client_factory(conn),
     )
     client = StatefulProxyClient(transport)
     proxy = FastMCPProxy(
@@ -60,7 +68,24 @@ def build_proxy(config: ServerConfig) -> FastMCP:
         instructions=SERVER_INSTRUCTIONS,
     )
     _disable_list_cache(proxy)
+    _install_recovery(proxy, config, endpoint, client)
     return proxy
+
+
+def _install_recovery(
+    proxy: FastMCPProxy,
+    config: ServerConfig,
+    endpoint: DaemonEndpoint,
+    client: StatefulProxyClient,
+) -> None:
+    """Put the recovery middleware outermost, ahead of fastmcp's own proxy middleware.
+
+    fastmcp runs ``middleware[0]`` outermost, and ``FastMCPProxy`` appends its
+    ``ProxyInitializeMiddleware``, which opens the backend session inside its
+    ``on_initialize`` hook. Appending would leave that connect attempt (the very
+    first thing a dead daemon breaks) outside our reach, so we insert at the front.
+    """
+    proxy.middleware.insert(0, DaemonRecoveryMiddleware(DaemonRecovery(config, endpoint), client))
 
 
 def _disable_list_cache(proxy: FastMCPProxy) -> None:
