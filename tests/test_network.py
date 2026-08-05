@@ -62,3 +62,57 @@ async def test_list_network_requests_filter(client: Client, flask_server: str) -
         )
     )
     assert "/api/echo" in result
+
+
+async def test_a_binary_post_body_does_not_poison_the_next_tool_call(
+    client: Client, flask_server: str
+) -> None:
+    """The regression test for the most frequent error this product ever had.
+
+    ``Request.post_data`` is a STRICT utf-8 decode of the raw body, so a page posting
+    bytes that are not valid utf-8 (a protobuf beacon, a multipart upload, a gzipped
+    payload, a Blob) used to raise ``UnicodeDecodeError`` inside Playwright's event
+    dispatch, from our own ``page.on("request")`` listener.
+
+    Playwright does not let that surface where it happens. It stashes the exception on
+    the connection and re-raises it at the top of the NEXT api call, where its error
+    rewriter does ``type(exc)(message)``. ``UnicodeDecodeError`` needs 5 constructor
+    arguments, so rebuilding it from 1 raises ``TypeError: function takes exactly 5
+    arguments (1 given)`` on an unrelated tool, before any I/O, with no traceback
+    anywhere. That is the 133 occurrences of issue #13.
+
+    So the assertion that matters is not about the POST at all: it is that the call
+    AFTER it still works. Reverting ``read_post_data`` in ``sessions/network.py`` to
+    ``request.post_data`` makes the ``evaluate`` below fail, which is what the previous
+    tests in this file did not catch.
+    """
+    await client.call_tool("navigate", {"profile": PROFILE, "url": f"{flask_server}/network"})
+
+    posted = tool_text(
+        await client.call_tool(
+            "evaluate",
+            {
+                "profile": PROFILE,
+                # 0x96 is a continuation byte with no lead byte: never valid utf-8.
+                "script": (
+                    "(async () => {"
+                    "  const body = new Uint8Array([0x00, 0x96, 0xfe, 0xff, 0x01]);"
+                    f"  const r = await fetch('{flask_server}/api/echo', "
+                    "    {method: 'POST', body, headers: {'Content-Type': 'application/octet-stream'}});"
+                    "  return r.status;"
+                    "})()"
+                ),
+            },
+        )
+    )
+    assert "200" in posted, posted
+
+    # The poison, if any, is latched on the connection and fires on the next call.
+    for attempt in range(3):
+        result = tool_text(
+            await client.call_tool("evaluate", {"profile": PROFILE, "script": "1 + 1"})
+        )
+        assert result.strip() == "2", f"call {attempt + 1} after a binary POST returned {result!r}"
+
+    entries = tool_text(await client.call_tool("list_network_requests", {"profile": PROFILE}))
+    assert "/api/echo" in entries, entries
