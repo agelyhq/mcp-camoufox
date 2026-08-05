@@ -1314,7 +1314,7 @@ wheels = [
 
 [[package]]
 name = "mcp-camoufox"
-version = "0.3.0"
+version = "0.3.2"
 source = { editable = "." }
 dependencies = [
     { name = "camoufox", extra = ["geoip"] },

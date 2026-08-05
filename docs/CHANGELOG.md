@@ -6,9 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.3.1] - 2026-08-05
+## [0.3.2] - 2026-08-05
 
-A release pipeline that runs the tests, and a suite that no longer measures the machine.
+A release pipeline that runs the tests, a suite that no longer measures the machine, and a
+daemon that cleans up after itself.
+
+0.3.1 carries the same work and was tagged, but it never reached PyPI: the new pipeline ran
+the suite, found the daemon defect below, and stopped before publishing. That is what it is
+for, so the tag stays where it is and this is the version you can install.
 
 ### Changed
 
@@ -35,6 +40,20 @@ A release pipeline that runs the tests, and a suite that no longer measures the 
 
 ### Fixed
 
+- **The daemon never withdrew its address advert, on any exit.** Not intermittently: the
+  code that removed it had never run. Every exit the daemon has is a signal, since the idle
+  watchdog and `/shutdown` both raise SIGTERM at themselves, and uvicorn answers a signal by
+  shutting down, restoring the handler installed before it, then re-raising. The process
+  died inside the serve call, so nothing after it ran, `finally` blocks included. Withdrawal
+  now happens in a handler installed around that call, which is the one uvicorn restores,
+  and the proof that the advert is this daemon's own is read back synchronously at `bind()`
+  instead of coming from a background task that a signal could cancel before it produced
+  one. Left behind, a stale advert costs the next proxy a failed probe before it recovers.
+- The test that should have caught the line above passed here and failed only on the release
+  runner, because Python 3.13's asyncio unlinks a closed Unix socket by itself and 3.12 does
+  not. The assertion was being satisfied by the standard library rather than by this
+  project's code, on 1 of the 2 interpreter versions it supports. Both advert files, the
+  socket and the pointer, are now asserted on.
 - A duplicated block at the head of a test module shadowed its own helpers, so 3 functions
   were defined twice and the first definition of each was dead.
 
@@ -381,8 +400,8 @@ backed by Camoufox, with per-profile session isolation.
 
 - The S3 profile sync stack. Profiles are local-disk only.
 
-[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.1...HEAD
-[0.3.1]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.0...v0.3.1
+[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.0...v0.3.2
 [0.3.0]: https://github.com/agelyhq/mcp-camoufox/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/agelyhq/mcp-camoufox/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/agelyhq/mcp-camoufox/releases/tag/v0.1.1
