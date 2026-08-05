@@ -61,8 +61,7 @@ differentiators, credits), never grows a reference section, and names no other p
 - `click`/`fill` take `uid` XOR `selector`, resolved through `tools/_target.py` so the
   rule and its wording live in 1 place. Both paths converge: a selector is polled until a
   match is visible, gets a uid, and the uid path takes over.
-- Every closed set of words a tool accepts is rejected through
-  `_errors.validate_choice`, once at the top of the body, before the side effect.
+- Closed sets of accepted words go through `_errors.validate_choice` before any side effect.
 - `observe` is appended by the `@tool` wrapper, never by a tool body, and capped at 4000
   chars in both modes so an appendix cannot outweigh the action. `'screenshot'` is
   deliberately not a mode: it would break the sole-image-tool invariant.
@@ -91,22 +90,23 @@ differentiators, credits), never grows a reference section, and names no other p
   `caret="initial"`; `evaluate_handle` may only ever build the registry object. Banned
   repo-wide: `locator()`, `query_selector`, `wait_for_selector`, `wait_for_function`,
   `page.<action>(selector, ...)`, every `ElementHandle` action. Both reasons are measured
-  in `docs/architecture.md`. Guarded by `tests/test_no_markers.py`, whose probes are
-  proved able to detect each signal before asserting its absence.
+  in `docs/architecture.md`. Guarded by `tests/test_no_markers.py`, whose probes
+  (`tests/probes.py`) are proved able to detect each signal before asserting its absence,
+  refuse a document the parser has not finished, and name every mutation's target: a bare
+  count cannot tell our leak from the browser's. Camoufox adds uBlock Origin to every
+  launch whatever `CAMOUFOX_ADDON_URLS` says, so the page holds 1 actor more than it says.
 - No `await` in injected JS: `page.evaluate` has no deadline at any layer and a page can
   replace `Promise`. Every op is one synchronous turn, bounded from Python. No file under
   `dom/js/` may name this project: a page hooking `window.eval` reads that source verbatim.
 - Every built-in the bundle calls is captured in `B` at boot, and no bundle file may use
   `for...of` or an `Array.prototype` method: both resolve on the page's own prototypes at
   call time, so a page replacing one counts every element we examine. Collect with
-  `out[out.length] = x`. Keep the `00_boot.js` comment honest about what the capture does
-  NOT cover rather than complete-sounding. Guarded by `tests/test_dom_layering.py` and
-  `tests/test_observability_boundary.py`.
+  `out[out.length] = x`. Keep the `00_boot.js` comment honest about what it does NOT cover.
+  Guarded by `tests/test_dom_layering.py` and `tests/test_observability_boundary.py`.
 - A uid names 1 element in 1 tab and 1 document: it survives a re-render there, and any
   other tab or document refuses it. Numbers carry no document order. A closed tab raises
   `TargetClosedError`, never the stale-uid string.
-- `dom/` takes any object satisfying the page protocol; it imports neither `sessions/`
-  types nor Playwright.
+- `dom/` takes any page-protocol object, importing neither `sessions/` types nor Playwright.
 - Startup auto-update is fail-open AND non-blocking: only a cold install blocks, the version
   check runs in a background task throttled to 24h, and never writes inside site-packages.
 - `humanize` is opt-in and off by default: a missed `hit-renderer` ack wedges a
