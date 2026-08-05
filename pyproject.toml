@@ -1,6 +1,6 @@
 [project]
 name = "mcp-camoufox"
-version = "0.3.2"
+version = "0.3.3"
 description = "Browser automation MCP server that does not get blocked, backed by Camoufox anti-detect Firefox"
 readme = "README.md"
 requires-python = ">=3.12"

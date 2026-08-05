@@ -6,16 +6,36 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.3.2] - 2026-08-05
+## [0.3.3] - 2026-08-05
 
 A release pipeline that runs the tests, a suite that no longer measures the machine, and a
 daemon that cleans up after itself.
 
-0.3.1 carries the same work and was tagged, but it never reached PyPI: the new pipeline ran
-the suite, found the daemon defect below, and stopped before publishing. That is what it is
-for, so the tag stays where it is and this is the version you can install.
+0.3.1 and 0.3.2 carry the same work and were both tagged, and neither reached PyPI: the new
+pipeline ran the suite and stopped each of them in turn, first on the daemon defect below,
+then on the marker test. That is what it is for, so both tags stay where they are, and this
+is the version you can install.
 
 ### Changed
+
+- **The marker test says what it saw, and refuses to measure a page the parser has not
+  finished.** The 0.3.2 release run failed on it with
+  `['childList:', 'childList:', 'childList:']`: 3 mutations and nothing about whose they
+  were, which is unactionable for the one test that carries the project's central claim.
+  Every record now names its target (node name, id, class) and, for a child-list change,
+  the nodes added and removed. The probes also report the `readyState` they were armed at
+  and accept nothing but `complete`, because an unfinished parse appends the rest of the
+  page while they are recording and those appends are indistinguishable by count from a
+  leak of ours: arming on a page whose tail arrives late was measured producing exactly
+  that shape. Nothing was relaxed, the tally still has to be empty. The instrument moved
+  to `tests/probes.py` and the driver artifact it pins to
+  `tests/test_driver_footprint.py`, the module having outgrown 300 lines.
+- **Camoufox adds uBlock Origin to every launch, whatever `CAMOUFOX_ADDON_URLS` says.**
+  That variable sets this project's own addon list (by default a cookie blocker) and
+  cannot remove the browser's, since excluding it needs an argument nothing passes. It
+  was measured inserting nothing into a loopback page, so it is not what the release run
+  recorded, but the marker test claimed to run with no extension at all and now states
+  what is actually there. Documented in `configuration.md`.
 
 - **Publishing now runs the whole test suite first.** 0.3.0 was uploaded on the word that
   the suite passed locally: the workflow built and published without executing a single
@@ -37,6 +57,11 @@ for, so the tag stays where it is and this is the version you can install.
   received instead of matching a word in the result string, the infinite-scroll test waits
   for the page to be quiescent so its baseline is a settled number, and 8 assertions of the
   form "error appears somewhere in the output" now pin the exact one-line error.
+- Downloaded addon archives are cached under `<data_dir>/addons/` (`CAMOUFOX_DATA_DIR`)
+  instead of `~/.cache/camoufox-mcp/addons`, like every other path the server owns. They
+  are re-downloaded once.
+- One cold browser launch no longer blocks the first call of every other profile: launch
+  locking is per profile, which matters most in daemon mode.
 
 ### Fixed
 
@@ -56,10 +81,6 @@ for, so the tag stays where it is and this is the version you can install.
   socket and the pointer, are now asserted on.
 - A duplicated block at the head of a test module shadowed its own helpers, so 3 functions
   were defined twice and the first definition of each was dead.
-
-
-### Fixed
-
 - `list_network_requests` and `list_console_messages` no longer go blank on a page that
   holds an iframe. Both monitors rotated their buffers on `framenavigated`, which fires
   for every frame, so an ad, a captcha or any embed navigating after load moved the
@@ -80,14 +101,6 @@ for, so the tag stays where it is and this is the version you can install.
   anyway; the error is now `NoPendingDialogError` rather than a bare `RuntimeError`.
 - A `viewport_width` supplied without a `viewport_height` (or the reverse) is refused
   instead of being silently dropped.
-
-### Changed
-
-- Downloaded addon archives are cached under `<data_dir>/addons/` (`CAMOUFOX_DATA_DIR`)
-  instead of `~/.cache/camoufox-mcp/addons`, like every other path the server owns. They
-  are re-downloaded once.
-- One cold browser launch no longer blocks the first call of every other profile: launch
-  locking is per profile, which matters most in daemon mode.
 
 ## [0.3.0] - 2026-08-05
 
@@ -400,8 +413,8 @@ backed by Camoufox, with per-profile session isolation.
 
 - The S3 profile sync stack. Profiles are local-disk only.
 
-[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.2...HEAD
-[0.3.2]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.0...v0.3.2
+[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.0...v0.3.3
 [0.3.0]: https://github.com/agelyhq/mcp-camoufox/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/agelyhq/mcp-camoufox/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/agelyhq/mcp-camoufox/releases/tag/v0.1.1
