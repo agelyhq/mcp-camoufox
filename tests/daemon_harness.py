@@ -142,6 +142,22 @@ def wait_gone(cfg: ServerConfig, deadline: float = 15.0) -> bool:
     return probe_health(cfg, ENDPOINT) is None
 
 
+def wait_advert_gone(cfg: ServerConfig, deadline: float = 10.0) -> bool:
+    """Wait for the advert to disappear, rather than demanding it already has.
+
+    A daemon stops answering, exits, and unlinks its advert, in that order. On a 2-core
+    runner those 3 can land whole seconds apart, so asserting the file is gone the instant
+    the process is reaped tests the scheduler, not the cleanup. The condition asserted is
+    unchanged: the advert must go. Only the "immediately" is dropped.
+    """
+    end = time.monotonic() + deadline
+    while time.monotonic() < end:
+        if not advert_path(cfg).exists():
+            return True
+        time.sleep(0.1)
+    return not advert_path(cfg).exists()
+
+
 def reap(cfg: ServerConfig, pid: int, deadline: float = 5.0) -> bool:
     """Confirm a spawned daemon has actually terminated.
 

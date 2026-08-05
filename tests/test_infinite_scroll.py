@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING
 
 from tests.helpers import PROFILE, evaluate, tool_text
@@ -50,15 +51,28 @@ async def test_infinite_scroll_loads_more_on_scroll(client: Client, flask_server
 
 
 async def test_infinite_scroll_network_requests(client: Client, flask_server: str) -> None:
+    """The page's own fetch is captured and filterable by resource type.
+
+    Polled rather than slept on. A fixed wait asserts that a 2-core runner is as fast as a
+    workstation, which it is not: the page's first fetch landed well past 1 second in CI
+    and the test failed for a reason unrelated to capture. The condition is unchanged, the
+    deadline is simply generous enough to be about the monitor rather than the machine.
+    """
     await client.call_tool(
         "navigate", {"url": f"{flask_server}/infinite-scroll", "profile": PROFILE}
     )
-    await asyncio.sleep(1)
 
-    result = tool_text(
-        await client.call_tool(
-            "list_network_requests",
-            {"profile": PROFILE, "resource_types": ["fetch", "xhr"]},
+    deadline = time.monotonic() + 15.0
+    result = ""
+    while time.monotonic() < deadline:
+        result = tool_text(
+            await client.call_tool(
+                "list_network_requests",
+                {"profile": PROFILE, "resource_types": ["fetch", "xhr"]},
+            )
         )
-    )
-    assert "/api/items" in result
+        if "/api/items" in result:
+            break
+        await asyncio.sleep(0.25)
+
+    assert "/api/items" in result, result

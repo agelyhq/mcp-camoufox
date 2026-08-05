@@ -1,23 +1,38 @@
 name: Release
 
-# Publishes to PyPI when a version tag is pushed.
+# Publishes to PyPI, and only ever from a version tag.
 #
-# Authentication is GitHub OIDC trusted publishing, so there is no API token
-# anywhere: PyPI verifies the workflow identity directly. The publisher is
-# configured once at https://pypi.org/manage/account/publishing/ with this
-# repository, this workflow filename, and the "pypi" environment.
+# The shape is deliberate. Publishing is the one action in this project that cannot be
+# undone: a version number is burned on PyPI the moment it uploads, whether or not the
+# artifact was any good. So nothing reaches the upload step that has not been built,
+# checked, exercised against a real browser and approved by a human, in that order.
 #
-# The environment gate means a release waits for a manual approval in the
-# GitHub UI before the upload runs, which is the last chance to stop a bad tag.
+# 1. build   builds the wheel and the sdist, and refuses on bad metadata or on a tag that
+#            disagrees with the version inside it.
+# 2. verify  runs the entire E2E suite against a real browser, on the artifact's own tree.
+#            Lint is deliberately not here: it runs locally before a release, and failing a
+#            20 minute pipeline on formatting buys nothing.
+# 3. publish uploads, gated by the "pypi" environment, which requires a manual approval.
+#
+# Each job needs the one before it, so a red suite cannot be published past. Authentication
+# is GitHub OIDC trusted publishing: no token exists anywhere, PyPI verifies the workflow
+# identity itself, which is why `id-token: write` is scoped to the publish job alone.
 
 on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
+
+# No workflow_dispatch on purpose. It would allow a publish from any branch, which defeats
+# "tags only": the tag is the record of what was released, and a manual run has none.
 
 permissions:
   contents: read
+
+concurrency:
+  # 2 tags pushed close together must not race for the same version on PyPI.
+  group: release
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -34,8 +49,8 @@ jobs:
       - name: Build the wheel and the sdist
         run: uv build
 
-      # PEP 639 metadata is easy to get wrong and impossible to fix after an
-      # upload, since a version number can never be reused. Fail here instead.
+      # PEP 639 metadata is easy to get wrong and impossible to fix after an upload, since
+      # a version number can never be reused. Fail here instead.
       - name: Check the metadata
         run: |
           uvx twine check --strict dist/*
@@ -60,16 +75,80 @@ jobs:
           print("metadata OK")
           PY
 
+      # The tag is what people will install. If it disagrees with the package, the wrong
+      # thing is about to be published under the right name.
+      - name: Check the tag matches the version
+        run: |
+          python - <<'PY'
+          import os, pathlib, re, sys
+          tag = os.environ["GITHUB_REF_NAME"]
+          wheel = next(pathlib.Path("dist").glob("*.whl")).name
+          version = re.match(r"[^-]+-([^-]+)-", wheel).group(1)
+          if tag != f"v{version}":
+              sys.exit(f"tag {tag} does not match built version {version}")
+          print(f"tag {tag} matches version {version}")
+          PY
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
-  publish:
-    name: Publish to PyPI
+  verify:
+    name: Full E2E suite
     needs: build
     runs-on: ubuntu-latest
-    environment: pypi
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - run: uv sync --extra dev
+
+      # The suite drives a real browser, so it needs the binary and an X server. Xvfb is
+      # what CAMOUFOX_HEADLESS=virtual uses, and virtual is the mode this project actually
+      # recommends, so testing under it tests what users run.
+      - name: Install Xvfb
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+
+      # About 500 MB, and it changes only when the pin moves, so key the cache on the pin.
+      - name: Cache the browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/camoufox
+          key: camoufox-${{ runner.os }}-${{ hashFiles('src/camoufox_mcp/config.py') }}
+
+      - name: Fetch the browser
+        run: |
+          uv run python - <<'PY'
+          import asyncio
+          from camoufox_mcp.config import ServerConfig
+          from camoufox_mcp.updater import ensure_browser_present
+          asyncio.run(ensure_browser_present(ServerConfig.from_env()))
+          PY
+
+      # No -x and no subset: a release is the one time the whole thing must be green. The
+      # suite is bounded per-test by pytest-timeout, and the job by timeout-minutes above,
+      # so a wedged browser fails the release instead of hanging it.
+      - name: Full E2E suite
+        env:
+          CAMOUFOX_HEADLESS: "true"
+          TEST_FLASK_PORT: "5123"
+        run: uv run pytest -q
+
+  publish:
+    name: Publish to PyPI
+    needs: verify
+    runs-on: ubuntu-latest
+    # Requires a manual approval, which is the last chance to stop a bad tag. Configured
+    # once in the repository settings with a required reviewer.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/mcp-camoufox/
     permissions:
       id-token: write
     steps:

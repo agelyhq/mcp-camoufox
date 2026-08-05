@@ -15,11 +15,11 @@ from tests.daemon_harness import (
     ENDPOINT,
     IS_WINDOWS,
     Harness,
-    advert_path,
     assert_hardened,
     control_client,
     daemon_session,
     reap,
+    wait_advert_gone,
     wait_gone,
 )
 from tests.helpers import tool_text
@@ -86,7 +86,7 @@ def test_idle_ttl_exits(daemon_env: Harness, monkeypatch: pytest.MonkeyPatch) ->
 
     assert wait_gone(cfg, deadline=15.0), "daemon did not idle-exit within its TTL"
     assert reap(cfg, pid), "idle daemon process did not actually terminate"
-    assert not advert_path(cfg).exists(), "the exiting daemon left its advert behind"
+    assert wait_advert_gone(cfg), "the exiting daemon left its advert behind"
 
 
 def test_idle_mismatch_shuts_down_old_then_respawns(
