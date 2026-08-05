@@ -17,6 +17,7 @@ from tests.daemon_harness import (
     Harness,
     assert_hardened,
     control_client,
+    daemon_diagnostics,
     daemon_session,
     mismatched_identity,
     reap,
@@ -85,9 +86,13 @@ def test_idle_ttl_exits(daemon_env: Harness, monkeypatch: pytest.MonkeyPatch) ->
     assert health is not None
     pid = int(health["pid"])
 
-    assert wait_gone(cfg, deadline=15.0), "daemon did not idle-exit within its TTL"
-    assert reap(cfg, pid), "idle daemon process did not actually terminate"
-    assert wait_advert_gone(cfg), "the exiting daemon left its advert behind"
+    assert wait_gone(cfg, deadline=15.0), daemon_diagnostics(
+        cfg, "daemon did not idle-exit within its TTL"
+    )
+    assert reap(cfg, pid), daemon_diagnostics(cfg, "idle daemon process did not actually terminate")
+    assert wait_advert_gone(cfg), daemon_diagnostics(
+        cfg, "the exiting daemon left its advert behind"
+    )
 
 
 def test_idle_mismatch_shuts_down_old_then_respawns(
@@ -115,8 +120,12 @@ def test_idle_mismatch_shuts_down_old_then_respawns(
     ensure_daemon(cfg, ENDPOINT)
 
     assert spawned.get("called"), "mismatch path did not proceed to (re)spawn"
-    assert probe_health(cfg, ENDPOINT) is None, "idle mismatched daemon was not shut down"
-    assert reap(cfg, old_pid), "old mismatched daemon process did not terminate"
+    assert probe_health(cfg, ENDPOINT) is None, daemon_diagnostics(
+        cfg, "idle mismatched daemon was not shut down"
+    )
+    assert reap(cfg, old_pid), daemon_diagnostics(
+        cfg, "old mismatched daemon process did not terminate"
+    )
 
 
 async def test_active_mismatch_is_reused_not_killed(
