@@ -53,10 +53,20 @@ def published_socket_path(config: ServerConfig) -> Path:
     return pointer if pointer is not None else daemon_socket_path(config)
 
 
+def address_pointer_path(config: ServerConfig) -> Path:
+    """The file naming the address a running daemon bound, written by that daemon."""
+    return paths.daemon_dir(config) / _ADDRESS_FILE
+
+
 def publish_socket_path(config: ServerConfig, path: Path) -> None:
-    """Record, in the data dir, the address this daemon just bound."""
+    """Record, in the data dir, the address this daemon just bound.
+
+    Written through a temporary file and :func:`os.replace`, so a reader never sees a
+    half-written address and every publication lands as a distinct inode: that inode is
+    what identifies the publication to the daemon that made it.
+    """
     paths.ensure_daemon_dir(config)
-    target = paths.daemon_dir(config) / _ADDRESS_FILE
+    target = address_pointer_path(config)
     tmp = target.with_name(f"{_ADDRESS_FILE}.tmp")
     tmp.write_text(str(path), encoding="utf-8")
     with contextlib.suppress(OSError):
@@ -67,12 +77,12 @@ def publish_socket_path(config: ServerConfig, path: Path) -> None:
 def unpublish_socket_path(config: ServerConfig) -> None:
     """Drop the address pointer, so a stale one never outlives its daemon."""
     with contextlib.suppress(OSError):
-        (paths.daemon_dir(config) / _ADDRESS_FILE).unlink()
+        address_pointer_path(config).unlink()
 
 
 def _read_address_pointer(config: ServerConfig) -> Path | None:
     try:
-        raw = (paths.daemon_dir(config) / _ADDRESS_FILE).read_text(encoding="utf-8").strip()
+        raw = address_pointer_path(config).read_text(encoding="utf-8").strip()
     except OSError:
         return None
     return Path(raw) if raw else None

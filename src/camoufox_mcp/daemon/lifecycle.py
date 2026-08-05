@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import signal
@@ -13,7 +14,8 @@ from fastmcp.server.middleware import Middleware
 from camoufox_mcp.telemetry import now_iso
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Iterator
+    from types import FrameType
 
     from camoufox_mcp.config import ServerConfig
     from camoufox_mcp.sessions import SessionManager
@@ -22,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 _MAX_CHECK_INTERVAL_S = 15.0
 _MIN_CHECK_INTERVAL_S = 0.5
+
+# The same set uvicorn captures, so whatever it hands back is handled here too.
+_TERMINATION_SIGNALS = tuple(
+    getattr(signal, name) for name in ("SIGINT", "SIGTERM", "SIGBREAK") if hasattr(signal, name)
+)
 
 
 class ActivityState:
@@ -81,6 +88,37 @@ def _raise_terminate() -> None:
         signal.raise_signal(signal.SIGTERM)
     else:
         os.kill(os.getpid(), signal.SIGTERM)
+
+
+@contextlib.contextmanager
+def cleanup_on_termination(cleanup: Callable[[], None]) -> Iterator[None]:
+    """Run ``cleanup`` when a signal ends this process, before the process dies.
+
+    Nothing written after ``run_http_async`` runs on a signal exit, ``finally`` blocks
+    included: uvicorn captures SIGTERM, shuts down gracefully, restores the handler that
+    was installed before it, then re-raises the signal it caught. With the default
+    handler back in place that call is where the daemon dies. Since a signal is the ONLY
+    way this daemon ever exits (the idle watchdog and /shutdown both raise SIGTERM), the
+    advert was left on disk by every clean exit. Python 3.13's asyncio unlinks a closed
+    Unix socket by itself and 3.12 does not, which is why that only ever showed on the
+    3.12 release runner.
+
+    The handler installed here is the one uvicorn restores, so it runs at exactly that
+    point, with the server already stopped. It then re-raises under the default handler,
+    so terminating still means terminating.
+    """
+
+    def handler(signum: int, _frame: FrameType | None) -> None:
+        cleanup()
+        signal.signal(signum, signal.SIG_DFL)
+        signal.raise_signal(signum)
+
+    previous = {sig: signal.signal(sig, handler) for sig in _TERMINATION_SIGNALS}
+    try:
+        yield
+    finally:
+        for sig, handler_before in previous.items():
+            signal.signal(sig, handler_before)
 
 
 async def idle_watchdog(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import threading
-import time
 import urllib.request
 from typing import TYPE_CHECKING
 
@@ -9,6 +8,7 @@ import pytest
 from fastmcp import Client
 
 from tests.helpers import FLASK_PORT, server_for
+from tests.waits import poll_until_sync
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
@@ -17,6 +17,21 @@ if TYPE_CHECKING:
     from fastmcp import FastMCP
 
 FLASK_URL = f"http://127.0.0.1:{FLASK_PORT}"
+
+# A title only our index carries. The guard used to accept any answer on the port, so a
+# foreign server left over from an earlier run satisfied it while this run's own bind had
+# failed with EADDRINUSE: the session then reported 37 navigation failures across unrelated
+# tests, and none of them named the port. An assertion satisfied by something other than
+# the thing it is about is worth nothing.
+_INDEX_MARKER = b"MCP Tool Test Pages"
+
+
+def _ours_is_answering() -> bool:
+    try:
+        with urllib.request.urlopen(FLASK_URL, timeout=0.5) as answer:
+            return _INDEX_MARKER in answer.read()
+    except OSError:
+        return False
 
 
 @pytest.fixture(scope="session")
@@ -30,17 +45,12 @@ def flask_server() -> Iterator[str]:
     )
     server.start()
 
-    # Poll the condition, with the attempt count as the guardrail. Falling through
-    # silently used to yield anyway, so a server that never bound surfaced as a wall
-    # of navigation errors inside unrelated browser tests.
-    for _ in range(50):
-        try:
-            urllib.request.urlopen(FLASK_URL, timeout=0.5)
-            break
-        except OSError:
-            time.sleep(0.1)
-    else:
-        pytest.fail(f"the Flask test server never came up on {FLASK_URL}")
+    if not poll_until_sync(_ours_is_answering, deadline=5.0):
+        pytest.fail(
+            f"no test server of ours answered on {FLASK_URL}. If the port is already taken, "
+            f"set TEST_FLASK_PORT: without this check every browser test fails on a blank "
+            f"page instead, which reads as 37 broken tests rather than 1 busy port."
+        )
 
     yield FLASK_URL
 

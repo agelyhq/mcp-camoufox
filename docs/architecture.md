@@ -24,7 +24,8 @@ src/camoufox_mcp/
                        error rendering, observation, settled observation, page line,
                        target resolution and text helpers
   daemon/              optional shared daemon: proxy, spawn, lifecycle, routes, recovery,
-                       endpoint and socket path, identity, auth
+                       the endpoint abstraction with its unix and loopback strategies,
+                       socket path, identity, auth
 ```
 
 Dependencies point inward: `tools/` uses `sessions/` and `dom/`, which use `config.py`.

@@ -22,8 +22,8 @@ from camoufox_mcp.config import ServerConfig
 from camoufox_mcp.daemon import paths
 from camoufox_mcp.daemon.endpoint import select_endpoint
 from camoufox_mcp.daemon.identity import DaemonIdentity
-from camoufox_mcp.daemon.socket_path import published_socket_path
-from camoufox_mcp.daemon.spawn import probe_health
+from camoufox_mcp.daemon.socket_path import address_pointer_path, published_socket_path
+from camoufox_mcp.daemon.spawn import log_tail, probe_health
 from tests.helpers import isolate_camoufox_env
 from tests.waits import poll_until_sync
 
@@ -33,6 +33,12 @@ if TYPE_CHECKING:
     import pytest
 
 IS_WINDOWS = os.name == "nt"
+
+# Enough of daemon.log to carry the shutdown sequence into a failure message, without
+# turning a CI report into a transcript. The scan window is wider than what is printed
+# because repeated lines are folded first (see _folded_log_tail).
+_LOG_TAIL_LINES = 20
+_LOG_SCAN_LINES = 200
 
 # The control-channel strategy the tests drive, built once like the daemon and the
 # proxy build theirs. Every daemon helper takes it as an argument.
@@ -92,9 +98,60 @@ def mismatched_identity(config: ServerConfig) -> DaemonIdentity:
     )
 
 
-def advert_path(cfg: ServerConfig) -> Path:
-    """Filesystem location of the daemon's address advert on this platform."""
-    return paths.endpoint_path(cfg) if IS_WINDOWS else published_socket_path(cfg)
+def advert_paths(cfg: ServerConfig) -> tuple[Path, ...]:
+    """Every file advertising a daemon's address on this platform.
+
+    POSIX publishes 2 of them, and asserting on the socket alone graded the platform
+    rather than the product: Python 3.13's asyncio unlinks a closed Unix socket by
+    itself, so a daemon that withdrew nothing still looked clean on 3.13 and left its
+    address pointer behind on 3.12, which is what the release runner caught.
+    """
+    if IS_WINDOWS:
+        return (paths.endpoint_path(cfg),)
+    return (published_socket_path(cfg), address_pointer_path(cfg))
+
+
+def daemon_diagnostics(cfg: ServerConfig, note: str) -> str:
+    """``note``, followed by the evidence a reader needs when they cannot reproduce it.
+
+    A failing daemon assertion used to say only what was expected. On a runner that is
+    all anyone gets: the data dir is a per-test temp dir the fixture removes, so
+    ``daemon.log`` dies with the run and the next step is a whole new release cycle. The
+    state that explains these failures is small, so it goes in the message: which advert
+    file is still there, which is not, where the pointer says the daemon was listening,
+    and what the daemon last said before it went.
+
+    Meant for the message half of an assertion (``assert cond, daemon_diagnostics(...)``),
+    which Python evaluates only when the condition already failed. The happy path reads
+    no files.
+    """
+    lines = [note, f"data dir: {cfg.data_dir}"]
+    for path in advert_paths(cfg):
+        lines.append(f"advert {path}: {'still there' if path.exists() else 'gone'}")
+    if not IS_WINDOWS:
+        lines.append(f"address pointer says: {_pointer_contents(cfg)}")
+    lines.append(f"--- {paths.log_path(cfg)} (tail) ---")
+    lines.append(_folded_log_tail(cfg))
+    return "\n".join(lines)
+
+
+def _folded_log_tail(cfg: ServerConfig) -> str:
+    """The tail of daemon.log with runs of one repeated line folded to that line.
+
+    A proxy polls /health every 0.2s while it waits, and uvicorn logs every probe
+    identically. On a slow runner those alone overflow any tail worth printing and push
+    out the shutdown sequence, which is the part that explains the failure.
+    """
+    seen = log_tail(cfg, lines=_LOG_SCAN_LINES).splitlines()
+    folded = [line for index, line in enumerate(seen) if index == 0 or line != seen[index - 1]]
+    return "\n".join(folded[-_LOG_TAIL_LINES:])
+
+
+def _pointer_contents(cfg: ServerConfig) -> str:
+    try:
+        return address_pointer_path(cfg).read_text(encoding="utf-8").strip() or "(empty)"
+    except OSError:
+        return "(no pointer file)"
 
 
 def control_client(cfg: ServerConfig) -> httpx.Client:
@@ -135,8 +192,9 @@ def _force_teardown(harness: Harness) -> None:
         if alive(pid):
             hard_kill(pid)
         reap(cfg, pid)
-    with contextlib.suppress(OSError):
-        advert_path(cfg).unlink()
+    for path in advert_paths(cfg):
+        with contextlib.suppress(OSError):
+            path.unlink()
 
 
 def alive(pid: int) -> bool:
@@ -160,14 +218,16 @@ def wait_gone(cfg: ServerConfig, deadline: float = 15.0) -> bool:
 
 
 def wait_advert_gone(cfg: ServerConfig, deadline: float = 10.0) -> bool:
-    """Wait for the advert to disappear, rather than demanding it already has.
+    """Wait for every advert file to disappear, rather than demanding they already have.
 
     A daemon stops answering, exits, and unlinks its advert, in that order. On a 2-core
-    runner those 3 can land whole seconds apart, so asserting the file is gone the instant
-    the process is reaped tests the scheduler, not the cleanup. The condition asserted is
-    unchanged: the advert must go. Only the "immediately" is dropped.
+    runner those 3 can land whole seconds apart, so asserting the files are gone the
+    instant the process is reaped tests the scheduler, not the cleanup. The condition
+    asserted is unchanged: the advert must go. Only the "immediately" is dropped.
     """
-    return poll_until_sync(lambda: not advert_path(cfg).exists(), deadline=deadline)
+    return poll_until_sync(
+        lambda: not any(path.exists() for path in advert_paths(cfg)), deadline=deadline
+    )
 
 
 def reap(cfg: ServerConfig, pid: int, deadline: float = 5.0) -> bool:

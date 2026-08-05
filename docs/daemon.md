@@ -33,7 +33,8 @@ mcp-camoufox-daemon          # or: python -m camoufox_mcp.daemon
 ## 🔒 The control channel
 
 The daemon speaks HTTP, but never on a routable port. How it is bound depends on the
-platform, decided at import time in `daemon/endpoint.py`.
+platform: `daemon/endpoint.py` holds the abstraction and picks the strategy,
+`daemon/endpoint_unix.py` and `daemon/endpoint_loopback.py` implement the 2 of them.
 
 **POSIX** uses a Unix domain socket under `$XDG_RUNTIME_DIR`, named after a digest of the
 resolved data directory, falling back to `<data_dir>/daemon/daemon.sock` when that variable
@@ -68,6 +69,25 @@ The daemon shuts itself down after `CAMOUFOX_DAEMON_TTL` seconds (default 1800),
 **only** when there are zero active sessions and zero in-flight requests. It never
 closes a live browser to meet a timeout. A long-running session keeps it alive
 indefinitely, which is the intended behaviour.
+
+## 🚪 How it withdraws its advert
+
+Every exit the daemon has is a signal: the idle watchdog and `/shutdown` both raise
+SIGTERM at themselves so uvicorn shuts down gracefully. Uvicorn then restores the signal
+handler that was installed before it and **re-raises** the signal it caught, so the
+process dies inside the serve call and nothing written after it ever runs, `finally`
+blocks included. The advert is therefore withdrawn from a signal handler installed around
+that call (`lifecycle.cleanup_on_termination`), which is precisely the handler uvicorn
+restores, and which re-raises under the default one so terminating still terminates.
+
+What it removes is only ever its own advert, proved by the identity read back at `bind()`
+when this daemon published it (on POSIX the inode of `daemon.address`, replaced atomically
+at every publication). No proof, no unlink: an advert on disk may belong to a daemon that
+is still serving, and taking it would leave that daemon's browsers running and unreachable.
+
+Worth knowing, because it hid the bug for a release: Python 3.13's asyncio unlinks a closed
+Unix socket by itself and 3.12 does not, so a daemon withdrawing nothing still looked clean
+on 3.13. The tests assert on every advert file, the socket and the pointer both.
 
 ## 🔄 Code reloads
 

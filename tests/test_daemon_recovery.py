@@ -16,7 +16,8 @@ from camoufox_mcp.daemon.spawn import ensure_daemon, probe_health
 from tests.daemon_harness import (
     ENDPOINT,
     Harness,
-    advert_path,
+    advert_paths,
+    daemon_diagnostics,
     daemon_session,
     hard_kill,
     mismatched_identity,
@@ -72,7 +73,7 @@ async def test_refused_shutdown_leaves_the_live_advert_alone(
     assert after is not None, "the live daemon's advert was removed"
     assert after["pid"] == before["pid"], "a replacement daemon took the address"
     assert after["active_sessions"] == 1, "the live session was lost"
-    assert advert_path(cfg).exists()
+    assert all(path.exists() for path in advert_paths(cfg))
 
 
 def _probe_hiding_the_first_session() -> Callable[[ServerConfig, DaemonEndpoint], dict | None]:
@@ -115,7 +116,7 @@ async def test_daemon_death_between_calls_is_reported_then_recovered(
         await proxy.call_tool("navigate", {"profile": "doomed", "url": flask_server})
 
         hard_kill(old_pid)
-        assert wait_gone(cfg), "the daemon survived SIGKILL"
+        assert wait_gone(cfg), daemon_diagnostics(cfg, "the daemon survived SIGKILL")
 
         # The concrete type depends on where the transport broke; the message is the contract.
         with pytest.raises(Exception) as excinfo:
@@ -167,7 +168,9 @@ async def test_daemon_death_mid_request_is_reported_in_bounded_time(
         assert await _session_registered(cfg), "the slow navigate never reached the daemon"
 
         hard_kill(old_pid)
-        assert await asyncio.to_thread(wait_gone, cfg), "the daemon survived SIGKILL"
+        assert await asyncio.to_thread(wait_gone, cfg), daemon_diagnostics(
+            cfg, "the daemon survived SIGKILL"
+        )
 
         # The budget is enforced by _verdict_within, which fails the test on expiry;
         # re-measuring the same window here could only ever fail on a slow machine.
