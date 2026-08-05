@@ -18,7 +18,7 @@ test:
 	CAMOUFOX_HEADLESS=true uv run pytest
 
 run:
-	uv run camoufox-mcp
+	uv run mcp-camoufox
 
 clean:
 	rm -rf .venv build dist *.egg-info .pytest_cache .ruff_cache
