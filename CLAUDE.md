@@ -107,22 +107,22 @@ differentiators, credits), never grows a reference section, and names no other p
   `TargetClosedError`, never the stale-uid string.
 - `dom/` takes any object satisfying the page protocol; it imports neither `sessions/`
   types nor Playwright.
-- Startup auto-update is fail-open AND non-blocking: only a cold install blocks, the
-  version check runs in a background task throttled to 24h, and it must never write inside
-  site-packages.
+- Startup auto-update is fail-open AND non-blocking: only a cold install blocks, the version
+  check runs in a background task throttled to 24h, and never writes inside site-packages.
 - `humanize` is opt-in and off by default: a missed `hit-renderer` ack wedges a
   process-global dispatch chain with no timeout, measured at 2,004,856 ms in production.
-  When set it must reach Camoufox as a **float**: `bool` subclasses `int`, and
-  `humanize:maxTime = true` is rejected as "not a double".
+  When set it must reach Camoufox as a **float**: `bool` subclasses `int`, "not a double".
 - `CAMOUFOX_HEADLESS` unset means a visible window (needs desktop GL); `virtual` (Xvfb) is
   the reliable invisible mode, **Linux-only**, and each launch gets its own `env` so the
   modes coexist. `CAMOUFOX_BROWSER_VERSION` pins the build; unset, the launcher chases
   upstream, which is how this project silently moved 1 Firefox major.
 - Daemon is opt-in (`CAMOUFOX_DAEMON=true`); unset, the code path is byte-identical to
   single-process mode. The proxy owns no auto-update, telemetry or `SessionManager`. TTL
-  exits only at zero sessions AND zero in-flight requests. Its control channel is
-  abstracted by `daemon/endpoint.py`; keep POSIX behavior untouched. An advert is only
-  ever removed by the owner that proved it is its own. Details in `docs/daemon.md`.
+  exits only at zero sessions AND zero in-flight requests. `daemon/endpoint.py` abstracts
+  the channel, `endpoint_unix.py` and `endpoint_loopback.py` implement it. Every exit is a
+  signal that uvicorn re-raises, so NOTHING after `run_http_async` runs, `finally` included:
+  cleanup goes in `lifecycle.cleanup_on_termination`. An advert is removed only by its
+  proven owner, proof taken at `bind()`. Details in `docs/daemon.md`.
 
 ## Build / lint / test
 
@@ -130,17 +130,17 @@ differentiators, credits), never grows a reference section, and names no other p
 local Flask, offline), `make run`. The only CI is `.github/workflows/release.yml`: a version
 tag builds, refuses a tag disagreeing with the built version, runs the WHOLE suite on the
 runner, then publishes through OIDC behind a manual approval. Lint is not in it, it runs
-here. **No test may wait a duration before asserting**: wait for the appearance, with a
-deadline as the guardrail. Every poll goes through `tests/waits.py:poll_until`. Shared test
-code lives only in `tests/`: `helpers.py`, `waits.py`, `fakes.py`, `evaluate_helpers.py`,
-`daemon_harness.py`. The `tools/list` payload is budgeted in `tests/payload_baseline.json`.
+here. That runner is **Python 3.12** and this box 3.13, so verify a release under
+`uv run --python 3.12`: a 3.13 stdlib behaviour once satisfied an assertion our own code
+owed, and the defect shipped. **No test may wait a duration before asserting**: wait for the
+appearance, deadline as guardrail, via `tests/waits.py:poll_until`. Shared test code lives
+only in `tests/`; `tools/list` is budgeted in `tests/payload_baseline.json`.
 
 ## Out of scope
 
 CDP/V8-only capabilities (heap snapshots, Chrome tracing, Lighthouse, screencast,
-throttling), client-facing network transport (stdio only), cloud profile sync, session TTL,
-iframe and shadow-root uids. Each is argued in `docs/decisions.md`: point there rather than
-re-litigating it in review.
+throttling), client-facing transport (stdio only), cloud profile sync, session TTL, iframe
+and shadow-root uids. Argued in `docs/decisions.md`: point there, do not re-litigate.
 
 ## License
 
