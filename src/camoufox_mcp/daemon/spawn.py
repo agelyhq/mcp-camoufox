@@ -179,11 +179,17 @@ def _wait_healthy(config: ServerConfig, endpoint: DaemonEndpoint, identity: Daem
         time.sleep(_POLL_INTERVAL_S)
     raise DaemonSpawnError(
         f"daemon did not become healthy within {_HEALTHY_DEADLINE_S:.0f}s.\n"
-        f"--- {paths.log_path(config)} (tail) ---\n{_log_tail(config)}"
+        f"--- {paths.log_path(config)} (tail) ---\n{log_tail(config)}"
     )
 
 
-def _log_tail(config: ServerConfig, lines: int = 40) -> str:
+def log_tail(config: ServerConfig, lines: int = 40) -> str:
+    """The last ``lines`` of the detached daemon's log, or why there are none.
+
+    Public because a spawn failure is not the only failure that is unreadable without
+    it: the tests' daemon harness folds the same tail into an assertion message, since
+    the log lives in a data dir that is gone by the time anyone reads a CI report.
+    """
     try:
         text = paths.log_path(config).read_text(encoding="utf-8", errors="replace")
     except OSError:
