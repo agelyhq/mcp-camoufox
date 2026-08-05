@@ -75,7 +75,10 @@ async def test_wait_for_invalid_condition(client: Client, flask_server: str) -> 
     result = tool_text(
         await client.call_tool("wait_for", {"profile": PROFILE, "condition": "bogus"})
     )
-    assert "error" in result.lower()
+    assert result == (
+        "Error: ValueError: invalid condition 'bogus'; valid values: "
+        "'load', 'selector', 'network_idle', 'predicate'"
+    ), result
 
 
 async def test_wait_for_predicate(client: Client, flask_server: str) -> None:
@@ -121,7 +124,9 @@ async def test_wait_for_predicate_missing_expression(client: Client, flask_serve
     result = tool_text(
         await client.call_tool("wait_for", {"profile": PROFILE, "condition": "predicate"})
     )
-    assert "error" in result.lower()
+    assert result == ("Error: ValueError: condition 'predicate' requires a non-empty expression"), (
+        result
+    )
 
 
 async def test_wait_for_predicate_timeout(client: Client, flask_server: str) -> None:

@@ -16,25 +16,39 @@ navigation commits, so it legitimately sits in the preserved buffer and always h
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 
-from tests.helpers import PROFILE, tool_text
+from tests.helpers import PROFILE
+from tests.waits import poll_tool_or_last, poll_tool_text, wait_predicate
 
 if TYPE_CHECKING:
     from fastmcp import Client
 
-# The page fetches once on load, then repoints its iframe 300ms later.
-_SETTLE_S = 2.0
+# The page fetches once on load, then repoints its iframe 300 ms later and announces it
+# on the same tick. Waiting for that milestone rather than for a fixed 2 s is what makes
+# this file mean anything: slept through, the sub-frame navigation may not have happened
+# yet, the buffer rotation under test is never triggered, and both tests pass covering
+# nothing. The predicate is strictly stronger than the sleep, since it implies the load
+# event fired and the page's own fetch resolved.
+_NAVIGATED_JS = "document.getElementById('status').textContent === 'subframe navigated'"
+
+
+def _one_completed_fetch(listing: str) -> bool:
+    fetch_lines = [line for line in listing.splitlines() if " fetch " in line]
+    return len(fetch_lines) == 1 and "pending" not in fetch_lines[0]
 
 
 async def test_a_subframe_navigation_keeps_the_tab_s_requests(
     client: Client, flask_server: str
 ) -> None:
     await client.call_tool("navigate", {"url": f"{flask_server}/subframe", "profile": PROFILE})
-    await asyncio.sleep(_SETTLE_S)
+    await wait_predicate(client, PROFILE, _NAVIGATED_JS)
 
-    listing = tool_text(await client.call_tool("list_network_requests", {"profile": PROFILE}))
+    # The monitors are fed by protocol events that can land after an evaluate round
+    # trip, so the page-side milestone alone does not settle the listing.
+    listing = await poll_tool_or_last(
+        client, "list_network_requests", {"profile": PROFILE}, _one_completed_fetch
+    )
 
     assert "No network requests captured." not in listing, listing
     # The fetch the page issued on load, and the sub-frame's first document, both
@@ -51,8 +65,10 @@ async def test_a_subframe_navigation_keeps_the_tab_s_console(
     client: Client, flask_server: str
 ) -> None:
     await client.call_tool("navigate", {"url": f"{flask_server}/subframe", "profile": PROFILE})
-    await asyncio.sleep(_SETTLE_S)
+    await wait_predicate(client, PROFILE, _NAVIGATED_JS)
 
-    messages = tool_text(await client.call_tool("list_console_messages", {"profile": PROFILE}))
+    messages = await poll_tool_text(
+        client, "list_console_messages", {"profile": PROFILE}, "parent loaded"
+    )
 
     assert "parent loaded" in messages, messages

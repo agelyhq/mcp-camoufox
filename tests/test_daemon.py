@@ -18,6 +18,7 @@ from tests.daemon_harness import (
     assert_hardened,
     control_client,
     daemon_session,
+    mismatched_identity,
     reap,
     wait_advert_gone,
     wait_gone,
@@ -100,7 +101,7 @@ def test_idle_mismatch_shuts_down_old_then_respawns(
 
     spawned: dict[str, bool] = {}
 
-    # Must mirror spawn._spawn_locked exactly: the endpoint strategy became an
+    # Must mirror spawn.spawn_locked exactly: the endpoint strategy became an
     # argument, and a stand-in still taking the old 2 raises TypeError inside
     # ensure_daemon instead of standing in for it.
     def _fake_spawn(
@@ -108,8 +109,8 @@ def test_idle_mismatch_shuts_down_old_then_respawns(
     ) -> None:
         spawned["called"] = True
 
-    monkeypatch.setattr(spawn, "local_identity", _mismatched_identity)
-    monkeypatch.setattr(spawn, "_spawn_locked", _fake_spawn)
+    monkeypatch.setattr(spawn, "local_identity", mismatched_identity)
+    monkeypatch.setattr(spawn, "spawn_locked", _fake_spawn)
 
     ensure_daemon(cfg, ENDPOINT)
 
@@ -131,7 +132,7 @@ async def test_active_mismatch_is_reused_not_killed(
     assert before is not None
     assert before["active_sessions"] == 1
 
-    monkeypatch.setattr(spawn, "local_identity", _mismatched_identity)
+    monkeypatch.setattr(spawn, "local_identity", mismatched_identity)
     ensure_daemon(cfg, ENDPOINT)
 
     after = probe_health(cfg, ENDPOINT)
@@ -153,12 +154,3 @@ async def test_shutdown_refused_while_sessions_active(
         response = client.post("/shutdown")  # unforced
     assert response.status_code == 409
     assert probe_health(cfg, ENDPOINT) is not None
-
-
-def _mismatched_identity(config: ServerConfig) -> DaemonIdentity:
-    """Identity of a proxy running different code than the daemon it finds."""
-    return DaemonIdentity(
-        version="9.9.9-mismatch",
-        code_path="/nowhere",
-        data_dir=str(config.data_dir),
-    )

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import threading
 import time
 import urllib.request
@@ -9,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from fastmcp import Client
 
-from tests.helpers import isolate_camoufox_env
+from tests.helpers import FLASK_PORT, server_for
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
@@ -17,8 +16,6 @@ if TYPE_CHECKING:
 
     from fastmcp import FastMCP
 
-# TEST_FLASK_PORT lets parallel pytest invocations avoid binding the same port.
-FLASK_PORT = int(os.environ.get("TEST_FLASK_PORT", "5123"))
 FLASK_URL = f"http://127.0.0.1:{FLASK_PORT}"
 
 
@@ -33,12 +30,17 @@ def flask_server() -> Iterator[str]:
     )
     server.start()
 
+    # Poll the condition, with the attempt count as the guardrail. Falling through
+    # silently used to yield anyway, so a server that never bound surfaced as a wall
+    # of navigation errors inside unrelated browser tests.
     for _ in range(50):
         try:
             urllib.request.urlopen(FLASK_URL, timeout=0.5)
             break
         except OSError:
             time.sleep(0.1)
+    else:
+        pytest.fail(f"the Flask test server never came up on {FLASK_URL}")
 
     yield FLASK_URL
 
@@ -57,12 +59,7 @@ def mcp_server(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> FastMCP:
     asyncio primitives never leak across pytest's per-test event loops, and so each
     test gets a clean profile/telemetry directory.
     """
-    isolate_camoufox_env(monkeypatch, data_dir)
-
-    from camoufox_mcp.bootstrap import build_server
-    from camoufox_mcp.config import ServerConfig
-
-    return build_server(ServerConfig.from_env())
+    return server_for(monkeypatch, data_dir)
 
 
 @pytest.fixture

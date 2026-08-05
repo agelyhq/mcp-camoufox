@@ -4,7 +4,6 @@ daemon that dies mid-conversation must be back for the next call."""
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import TYPE_CHECKING
 
 import pytest
@@ -12,7 +11,6 @@ from fastmcp import Client
 
 from camoufox_mcp.config import ServerConfig
 from camoufox_mcp.daemon import recovery, spawn
-from camoufox_mcp.daemon.identity import DaemonIdentity
 from camoufox_mcp.daemon.proxy import build_proxy
 from camoufox_mcp.daemon.spawn import ensure_daemon, probe_health
 from tests.daemon_harness import (
@@ -21,9 +19,11 @@ from tests.daemon_harness import (
     advert_path,
     daemon_session,
     hard_kill,
+    mismatched_identity,
     wait_gone,
 )
 from tests.helpers import tool_text
+from tests.waits import poll_until
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -41,10 +41,6 @@ _INFLIGHT_VERDICT_BUDGET_S = 45.0
 def daemon_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[Harness]:
     """Isolated daemon for one test (see :mod:`tests.daemon_harness`)."""
     yield from daemon_session(monkeypatch)
-
-
-def _mismatched_identity(config: ServerConfig) -> DaemonIdentity:
-    return DaemonIdentity(version="9.9.9-mismatch", code_path="/nowhere", data_dir="/nowhere")
 
 
 async def test_refused_shutdown_leaves_the_live_advert_alone(
@@ -66,8 +62,8 @@ async def test_refused_shutdown_leaves_the_live_advert_alone(
     assert before["active_sessions"] == 1
     daemon_env.track(int(before["pid"]))
 
-    monkeypatch.setattr(spawn, "local_identity", _mismatched_identity)
-    monkeypatch.setattr(spawn, "_ADDRESS_REMOVAL_DEADLINE_S", 1.0)
+    monkeypatch.setattr(spawn, "local_identity", mismatched_identity)
+    monkeypatch.setattr(spawn, "ADDRESS_REMOVAL_DEADLINE_S", 1.0)
     monkeypatch.setattr(spawn, "probe_health", _probe_hiding_the_first_session())
 
     ensure_daemon(cfg, ENDPOINT)
@@ -172,10 +168,10 @@ async def test_daemon_death_mid_request_is_reported_in_bounded_time(
 
         hard_kill(old_pid)
         assert await asyncio.to_thread(wait_gone, cfg), "the daemon survived SIGKILL"
-        killed_at = time.monotonic()
 
+        # The budget is enforced by _verdict_within, which fails the test on expiry;
+        # re-measuring the same window here could only ever fail on a slow machine.
         message = await _verdict_within(call, _INFLIGHT_VERDICT_BUDGET_S)
-        assert time.monotonic() - killed_at < _INFLIGHT_VERDICT_BUDGET_S
         # The exact message, not keywords: UNRECOVERED_MESSAGE also says "restarted",
         # so a substring check would accept a failed respawn as a success here.
         assert message == recovery.RESTARTED_MESSAGE
@@ -187,14 +183,17 @@ async def test_daemon_death_mid_request_is_reported_in_bounded_time(
 
 
 async def test_a_slow_call_on_a_healthy_daemon_is_never_cancelled(
-    daemon_env: Harness, flask_server: str
+    daemon_env: Harness, flask_server: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The watchdog separates "the daemon is gone" from "this call is taking a while".
 
     The single request below stays outstanding for several watch intervals, so the
-    liveness probe runs repeatedly against a daemon that is perfectly healthy. Any
-    version of the watchdog that gives up on elapsed time instead of on proof of
-    death fails here, which is the regression this pairs with the test above.
+    liveness probe runs repeatedly against a daemon that is perfectly healthy. What is
+    asserted is that structure, not a duration: more probes ran than it takes to
+    condemn a daemon, every one of them answered "still there", and the call still
+    returned its result. Any version of the watchdog that gives up on elapsed time
+    instead of on proof of death fails here, which is the regression this pairs with
+    the test above.
     """
     cfg = ServerConfig.from_env()
     ensure_daemon(cfg, ENDPOINT)
@@ -202,9 +201,10 @@ async def test_a_slow_call_on_a_healthy_daemon_is_never_cancelled(
     assert health is not None
     daemon_env.track(int(health["pid"]))
 
-    seconds = 5 * recovery._WATCH_INTERVAL_S
+    probes = _counted_liveness_probes(monkeypatch)
+
+    seconds = 5 * recovery.WATCH_INTERVAL_S
     async with Client(build_proxy(cfg, ENDPOINT)) as proxy:
-        started = time.monotonic()
         result = tool_text(
             await proxy.call_tool(
                 "navigate",
@@ -215,10 +215,35 @@ async def test_a_slow_call_on_a_healthy_daemon_is_never_cancelled(
                 },
             )
         )
-        elapsed = time.monotonic() - started
 
+    # Not "no probe ever answered gone": the product tolerates a lone refusal (a full
+    # accept backlog clears in milliseconds), which is why it demands 2 in a row. The
+    # returned result is the proof that no such run was ever reached.
     assert "Navigated to:" in result
-    assert elapsed > seconds, "the call was not outstanding long enough to be probed"
+    assert len(probes) > recovery.DEATH_CONFIRMATIONS, (
+        f"the call was probed {len(probes)} times, too few to prove the watchdog let a "
+        "healthy daemon's call run past the point where it condemns a dead one"
+    )
+
+
+def _counted_liveness_probes(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """Record every watchdog liveness probe, and its answer, as it happens.
+
+    ``proven_gone`` is the only thing ``_call_watched`` consults, so the length of
+    this list is exactly how many times the watchdog asked whether the daemon holding
+    the outstanding call still existed. Appending from the worker thread
+    ``asyncio.to_thread`` runs it on is safe: list.append is atomic.
+    """
+    real_probe = recovery.proven_gone
+    answers: list[bool] = []
+
+    def counting_probe(config: ServerConfig, endpoint: DaemonEndpoint) -> bool:
+        gone = real_probe(config, endpoint)
+        answers.append(gone)
+        return gone
+
+    monkeypatch.setattr(recovery, "proven_gone", counting_probe)
+    return answers
 
 
 async def _session_registered(cfg: ServerConfig, deadline: float = 60.0) -> bool:
@@ -230,13 +255,17 @@ async def _session_registered(cfg: ServerConfig, deadline: float = 60.0) -> bool
     Without this the kill could land before the request was even sent, silently
     degrading this test into the between-calls case that already passes.
     """
-    end = time.monotonic() + deadline
-    while time.monotonic() < end:
-        health = await asyncio.to_thread(probe_health, cfg, ENDPOINT)
-        if health is not None and int(health["active_sessions"]) >= 1:
-            return True
-        await asyncio.sleep(0.1)
-    return False
+
+    async def health() -> dict | None:
+        return await asyncio.to_thread(probe_health, cfg, ENDPOINT)
+
+    _, registered = await poll_until(
+        health,
+        lambda h: h is not None and int(h["active_sessions"]) >= 1,
+        deadline=deadline,
+        interval=0.1,
+    )
+    return registered
 
 
 async def _verdict_within(call: asyncio.Future, budget: float) -> str:

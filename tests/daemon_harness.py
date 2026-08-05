@@ -21,9 +21,11 @@ import httpx
 from camoufox_mcp.config import ServerConfig
 from camoufox_mcp.daemon import paths
 from camoufox_mcp.daemon.endpoint import select_endpoint
+from camoufox_mcp.daemon.identity import DaemonIdentity
 from camoufox_mcp.daemon.socket_path import published_socket_path
 from camoufox_mcp.daemon.spawn import probe_health
 from tests.helpers import isolate_camoufox_env
+from tests.waits import poll_until_sync
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -52,22 +54,42 @@ class Harness:
         self.pids.add(pid)
 
 
-def daemon_session(monkeypatch: pytest.MonkeyPatch) -> Iterator[Harness]:
+def daemon_session(
+    monkeypatch: pytest.MonkeyPatch, data_dir: Path | None = None
+) -> Iterator[Harness]:
     """Body of the per-test ``daemon_env`` fixture: private data dir, headless, no update.
 
     A plain generator rather than a fixture, so each test module declares its own
     ``daemon_env`` instead of importing one (an imported fixture reads as a redefinition
     at every test signature that takes it).
+
+    ``data_dir`` is a throwaway temporary directory unless a test needs a specific one
+    (a path long enough to overflow ``sun_path``, say); either way it is torn down here,
+    so no test hand-rolls the teardown.
     """
-    data_dir = Path(tempfile.mkdtemp(prefix="cfxd-"))
-    isolate_camoufox_env(monkeypatch, data_dir, CAMOUFOX_DAEMON_TTL="60")
+    root = Path(tempfile.mkdtemp(prefix="cfxd-")) if data_dir is None else data_dir
+    isolate_camoufox_env(monkeypatch, root, CAMOUFOX_DAEMON_TTL="60")
 
     harness = Harness(ServerConfig.from_env())
     try:
         yield harness
     finally:
-        force_teardown(harness)
-        rmtree_retry(data_dir)
+        _force_teardown(harness)
+        rmtree_retry(root)
+
+
+def mismatched_identity(config: ServerConfig) -> DaemonIdentity:
+    """Identity of a proxy running different code than the daemon it finds.
+
+    The version alone decides it: :meth:`DaemonIdentity.matches` needs all 3 fields to
+    agree, so one impossible version is the whole mismatch and the data dir stays the
+    real one instead of adding a second, incidental difference.
+    """
+    return DaemonIdentity(
+        version="9.9.9-mismatch",
+        code_path="/nowhere",
+        data_dir=str(config.data_dir),
+    )
 
 
 def advert_path(cfg: ServerConfig) -> Path:
@@ -99,7 +121,7 @@ def rmtree_retry(path: Path, deadline: float = 8.0) -> None:
     shutil.rmtree(path, ignore_errors=True)
 
 
-def force_teardown(harness: Harness) -> None:
+def _force_teardown(harness: Harness) -> None:
     """Force-shut the advertised daemon, then hard-kill every pid the test saw."""
     cfg = harness.cfg
     health = probe_health(cfg, ENDPOINT)
@@ -134,12 +156,7 @@ def hard_kill(pid: int) -> None:
 
 
 def wait_gone(cfg: ServerConfig, deadline: float = 15.0) -> bool:
-    end = time.monotonic() + deadline
-    while time.monotonic() < end:
-        if probe_health(cfg, ENDPOINT) is None:
-            return True
-        time.sleep(0.1)
-    return probe_health(cfg, ENDPOINT) is None
+    return poll_until_sync(lambda: probe_health(cfg, ENDPOINT) is None, deadline=deadline)
 
 
 def wait_advert_gone(cfg: ServerConfig, deadline: float = 10.0) -> bool:
@@ -150,12 +167,7 @@ def wait_advert_gone(cfg: ServerConfig, deadline: float = 10.0) -> bool:
     the process is reaped tests the scheduler, not the cleanup. The condition asserted is
     unchanged: the advert must go. Only the "immediately" is dropped.
     """
-    end = time.monotonic() + deadline
-    while time.monotonic() < end:
-        if not advert_path(cfg).exists():
-            return True
-        time.sleep(0.1)
-    return not advert_path(cfg).exists()
+    return poll_until_sync(lambda: not advert_path(cfg).exists(), deadline=deadline)
 
 
 def reap(cfg: ServerConfig, pid: int, deadline: float = 5.0) -> bool:
@@ -167,16 +179,15 @@ def reap(cfg: ServerConfig, pid: int, deadline: float = 5.0) -> bool:
     """
     if IS_WINDOWS:
         return wait_gone(cfg, deadline)
-    end = time.monotonic() + deadline
-    while time.monotonic() < end:
+
+    def terminated() -> bool:
         try:
             reaped, _ = os.waitpid(pid, os.WNOHANG)
         except ChildProcessError:
             return True
-        if reaped == pid:
-            return True
-        time.sleep(0.05)
-    return False
+        return reaped == pid
+
+    return poll_until_sync(terminated, deadline=deadline, interval=0.05)
 
 
 def assert_hardened(cfg: ServerConfig) -> None:
@@ -191,9 +202,7 @@ def assert_hardened(cfg: ServerConfig) -> None:
         return
     # The daemon tightens uvicorn's default 0o666 socket mode shortly after bind.
     socket_path = published_socket_path(cfg)
-    deadline = time.monotonic() + 2.0
-    while time.monotonic() < deadline:
-        if (socket_path.stat().st_mode & 0o777) == 0o600:
-            break
-        time.sleep(0.05)
+    poll_until_sync(
+        lambda: (socket_path.stat().st_mode & 0o777) == 0o600, deadline=2.0, interval=0.05
+    )
     assert (socket_path.stat().st_mode & 0o777) == 0o600

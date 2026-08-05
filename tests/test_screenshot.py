@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 from typing import TYPE_CHECKING
 
 from PIL import Image as PILImage
@@ -29,25 +30,57 @@ def _size(content: object) -> tuple[int, int]:
         return img.size
 
 
+async def _page_metrics(client: Client) -> dict[str, float]:
+    """What the page says its own viewport and document measure, in CSS pixels."""
+    return json.loads(
+        await evaluate(
+            client,
+            PROFILE,
+            "({w: window.innerWidth, h: window.innerHeight,"
+            " sh: document.documentElement.scrollHeight, dpr: window.devicePixelRatio})",
+        )
+    )
+
+
+def _in_device_pixels(css_pixels: float, dpr: float) -> int:
+    return round(css_pixels * dpr)
+
+
 async def test_screenshot_viewport(client: Client, flask_server: str) -> None:
+    """A viewport capture is exactly the viewport, in device pixels.
+
+    ``width > 0 and height > 0`` could not fail: PIL has already parsed the PNG two
+    lines earlier, and a PNG cannot declare a zero dimension. What the tool actually
+    promises is the visible viewport, so the page is asked what that measures and the
+    capture is compared against the answer.
+    """
     await client.call_tool("navigate", {"url": f"{flask_server}/screenshot", "profile": PROFILE})
+    metrics = await _page_metrics(client)
 
     result = await client.call_tool("screenshot", {"profile": PROFILE})
 
     width, height = _size(result.content[0])
-    assert width > 0 and height > 0
+    dpr = metrics["dpr"]
+    # 1 device pixel of slack, and no more: it covers a fractional devicePixelRatio
+    # rounding the other way, not a capture that missed the viewport.
+    assert abs(width - _in_device_pixels(metrics["w"], dpr)) <= 1, (width, metrics)
+    assert abs(height - _in_device_pixels(metrics["h"], dpr)) <= 1, (height, metrics)
 
 
 async def test_screenshot_full_page(client: Client, flask_server: str) -> None:
-    """A full-page capture is taller than the viewport one: the page scrolls."""
+    """A full-page capture covers the scrollable document, not just the viewport."""
     await client.call_tool("navigate", {"url": f"{flask_server}/screenshot", "profile": PROFILE})
+    metrics = await _page_metrics(client)
+    assert metrics["sh"] > metrics["h"], f"the page does not scroll: {metrics}"
 
     viewport = await client.call_tool("screenshot", {"profile": PROFILE})
     result = await client.call_tool("screenshot", {"profile": PROFILE, "full_page": True})
 
     _, viewport_h = _size(viewport.content[0])
     width, height = _size(result.content[0])
-    assert width > 0
+    dpr = metrics["dpr"]
+    assert abs(width - _in_device_pixels(metrics["w"], dpr)) <= 1, (width, metrics)
+    assert abs(height - _in_device_pixels(metrics["sh"], dpr)) <= 1, (height, metrics)
     assert height > viewport_h, f"full_page height {height} did not exceed {viewport_h}"
 
 

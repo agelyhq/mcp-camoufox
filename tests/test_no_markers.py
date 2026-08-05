@@ -21,26 +21,23 @@ from __future__ import annotations
 
 import asyncio
 import json
-import tempfile
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.helpers import PROFILE, evaluate, extract_uid, isolate_camoufox_env, tool_text
+from tests.helpers import PROFILE, evaluate, extract_uid, open_page, server_for, tool_text
+from tests.waits import poll_until
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
     from fastmcp import Client, FastMCP
 
 
 @pytest.fixture
 def mcp_server(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> FastMCP:
-    isolate_camoufox_env(monkeypatch, data_dir, CAMOUFOX_ADDON_URLS="")
-
-    from camoufox_mcp.bootstrap import build_server
-    from camoufox_mcp.config import ServerConfig
-
-    return build_server(ServerConfig.from_env())
+    return server_for(monkeypatch, data_dir, CAMOUFOX_ADDON_URLS="")
 
 
 # Armed AFTER navigation, so nothing it installs is wiped by a load. The test then
@@ -70,13 +67,44 @@ READ_PROBES_JS = "window.__p"
 _INTERCEPTOR_EVENTS = ("pointerdown", "auxclick", "touchcancel")
 
 
+# A negative claim has no appearance to wait for: the assertions say nothing arrived.
+# This is the window in which a leak would have had to show up, so it is a detection
+# window and not a settle time. It can only fail open, which is stated here because a
+# slower runner weakens the claim rather than breaking the run.
+_LEAK_WINDOW_S = 0.8
+# Bound on the positive waits below. The effect is asynchronous, so the loop stops on
+# the effect; the assertion that follows stays the verdict.
+_PROBE_DEADLINE_S = 10.0
+_PROBE_INTERVAL_S = 0.1
+
+
 async def _read_probes(client: Client) -> dict:
-    # The injected-script leak lands asynchronously, so give it time to show up.
-    await asyncio.sleep(0.8)
     return json.loads(await evaluate(client, PROFILE, READ_PROBES_JS))
 
 
-async def _drive_every_uid_path(client: Client, flask_server: str, upload: str) -> None:
+async def _probes_after_the_leak_window(client: Client) -> dict:
+    """The probe tally read once the detection window above has fully elapsed."""
+    await asyncio.sleep(_LEAK_WINDOW_S)
+    return await _read_probes(client)
+
+
+async def _probes_when(client: Client, accept: Callable[[dict], bool]) -> dict:
+    """Re-read the probes until ``accept`` holds, or the deadline runs out.
+
+    Expiry is deliberately not an error: every caller asserts the effect it waited
+    for on the value returned, so the assertion stays the verdict and keeps its own
+    message as the diagnostic. The deadline only stops the loop.
+    """
+    probes, _ = await poll_until(
+        lambda: _read_probes(client),
+        accept,
+        deadline=_PROBE_DEADLINE_S,
+        interval=_PROBE_INTERVAL_S,
+    )
+    return probes
+
+
+async def _drive_every_uid_path(client: Client, upload: str) -> None:
     snap = tool_text(await client.call_tool("snapshot", {"profile": PROFILE}))
     button = extract_uid(snap, "Probe button")
     text = extract_uid(snap, "Full name")
@@ -117,19 +145,17 @@ async def _drive_every_uid_path(client: Client, flask_server: str, upload: str) 
             assert not text_result.startswith(("Error:", "Timeout:")), f"{name}: {text_result}"
 
 
-async def test_no_markers_on_any_uid_path(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/probe", "profile": PROFILE})
+async def test_no_markers_on_any_uid_path(
+    client: Client, tmp_path: Path, flask_server: str
+) -> None:
+    await open_page(client, f"{flask_server}/probe")
     assert await evaluate(client, PROFILE, ARM_PROBES_JS) == "1"
 
-    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as handle:
-        handle.write(b"marker free upload")
-        upload = handle.name
-    try:
-        await _drive_every_uid_path(client, flask_server, upload)
-    finally:
-        Path(upload).unlink(missing_ok=True)
+    upload = tmp_path / "marker-free.txt"
+    upload.write_bytes(b"marker free upload")
+    await _drive_every_uid_path(client, str(upload))
 
-    probes = await _read_probes(client)
+    probes = await _probes_after_the_leak_window(client)
 
     assert probes["marks"] == [], "a target-marking event reached the page"
     assert probes["attrs"] == [], f"the page recorded mutations: {probes['attrs']}"
@@ -151,7 +177,7 @@ async def test_no_markers_on_any_uid_path(client: Client, flask_server: str) -> 
 
 async def test_probe_instruments_actually_detect(client: Client, flask_server: str) -> None:
     """Control: without this, a silently broken probe would pass every assertion."""
-    await client.call_tool("navigate", {"url": f"{flask_server}/probe", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/probe")
     assert await evaluate(client, PROFILE, ARM_PROBES_JS) == "1"
 
     await evaluate(
@@ -168,7 +194,15 @@ async def test_probe_instruments_actually_detect(client: Client, flask_server: s
         "})()",
     )
 
-    probes = await _read_probes(client)
+    probes = await _probes_when(
+        client,
+        lambda p: (
+            p["marks"] == ["mark"]
+            and "attributes:data-touched" in p["attrs"]
+            and p["mo"] == 1
+            and "pointerdown" in p["listeners"]
+        ),
+    )
     assert probes["marks"] == ["mark"]
     assert "attributes:data-touched" in probes["attrs"]
     assert probes["mo"] == 1
@@ -176,8 +210,8 @@ async def test_probe_instruments_actually_detect(client: Client, flask_server: s
 
 
 async def test_no_dom_residue(client: Client, flask_server: str) -> None:
-    """Issue 7: nothing is written to the DOM, mid-session as well as after a capture."""
-    await client.call_tool("navigate", {"url": f"{flask_server}/probe", "profile": PROFILE})
+    """Nothing is written to the DOM, mid-session as well as after a capture."""
+    await open_page(client, f"{flask_server}/probe")
 
     snap = tool_text(await client.call_tool("snapshot", {"profile": PROFILE}))
     assert (
@@ -216,16 +250,23 @@ async def test_node_valued_console_argument_forces_the_driver_injected_script(
     by accident. If the node case ever stops leaking, this test fails: that is the
     signal to tighten the invariant above and the wording in the docs.
     """
-    await client.call_tool("navigate", {"url": f"{flask_server}/probe", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/probe")
     assert await evaluate(client, PROFILE, ARM_PROBES_JS) == "1"
 
     assert await evaluate(client, PROFILE, LOG_STRING_JS) == "1"
-    control = await _read_probes(client)
+    control = await _probes_after_the_leak_window(client)
     assert control["listeners"] == [], f"a string argument leaked: {control['listeners']}"
     assert control["mo"] == 0
 
     assert await evaluate(client, PROFILE, LOG_NODE_JS) == "1"
-    probes = await _read_probes(client)
+    probes = await _probes_when(
+        client,
+        lambda p: (
+            any("__playwright_global_listeners_check__" in t for t in p["listeners"])
+            and all(t in p["listeners"] for t in _INTERCEPTOR_EVENTS)
+            and p["mo"] == 1
+        ),
+    )
     assert any("__playwright_global_listeners_check__" in t for t in probes["listeners"]), (
         "the driver no longer instantiates its injected script for a node-valued "
         f"console argument: tighten the invariant and the docs. Got {probes['listeners']}"

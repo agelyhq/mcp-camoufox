@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -33,6 +32,7 @@ from camoufox_mcp import dom, tools
 from camoufox_mcp.dom import identity
 from camoufox_mcp.dom.identity import locate_many
 from camoufox_mcp.dom.source import OPS
+from tests.fakes import ScriptedStorePage
 
 _JS_DIR = Path(dom.__file__).resolve().parent / "js"
 _TOOLS_DIR = Path(tools.__file__).resolve().parent
@@ -49,23 +49,6 @@ _FOR_OF = re.compile(r"\bfor\s*\(\s*(?:const|let|var)\s+\w+\s+of\b")
 # we built is still ``Array.prototype.push``, so a page that replaces it gets a tally
 # of every match we collect. Plain index writes (``out[out.length] = x``) do not.
 _ARRAY_METHOD = re.compile(r"\.(push|pop|shift|unshift|filter|map|forEach|sort|some|every)\(")
-
-
-class _Store:
-    """The element store of one tab, answering one scripted payload per call."""
-
-    def __init__(self, payload: Any) -> None:
-        self._payload = payload
-        self.calls: list[tuple[str, dict[str, Any]]] = []
-
-    async def call(self, op: str, arg: dict[str, Any] | None = None, **_: Any) -> Any:
-        self.calls.append((op, dict(arg or {})))
-        return self._payload
-
-
-class _Page:
-    def __init__(self, payload: Any) -> None:
-        self.elements = _Store(payload)
 
 
 def _js(name: str) -> str:
@@ -128,7 +111,7 @@ def test_the_interactivity_signals_are_written_once() -> None:
 
 async def test_locate_many_hands_a_tool_the_uids_and_the_total() -> None:
     """One store call carries the caller's limit; the total is what matched before it."""
-    page = _Page({"ok": True, "ids": ["e1", "e2"], "total": 5})
+    page = ScriptedStorePage({"ok": True, "ids": ["e1", "e2"], "total": 5})
 
     assert await locate_many(page, ".row", limit=2, deadline=0.0) == (["e1", "e2"], 5)
     assert page.elements.calls == [
@@ -137,7 +120,7 @@ async def test_locate_many_hands_a_tool_the_uids_and_the_total() -> None:
 
 
 async def test_locate_many_names_the_selector_that_matched_nothing() -> None:
-    page = _Page({"ok": True, "ids": [], "total": 0})
+    page = ScriptedStorePage({"ok": True, "ids": [], "total": 0})
 
     with pytest.raises(ValueError) as raised:
         await locate_many(page, ".row", limit=3, deadline=0.0)

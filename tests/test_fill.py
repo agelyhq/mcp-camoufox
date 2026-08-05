@@ -3,7 +3,16 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from tests.helpers import PROFILE, evaluate, extract_uid, goto_and_find, text_content, tool_text
+from tests.helpers import (
+    OBSERVATION_SNAPSHOT_MARK,
+    PROFILE,
+    evaluate,
+    extract_uid,
+    goto_and_find,
+    open_page,
+    text_content,
+    tool_text,
+)
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -115,7 +124,7 @@ async def test_fill_plain_uid_output_unchanged(client: Client, flask_server: str
 
 
 async def test_fill_by_selector(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/fill", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/fill")
 
     result = tool_text(
         await client.call_tool(
@@ -130,7 +139,7 @@ async def test_fill_by_selector(client: Client, flask_server: str) -> None:
 
 
 async def test_fill_selector_both_errors(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/fill", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/fill")
     result = tool_text(
         await client.call_tool(
             "fill",
@@ -142,7 +151,7 @@ async def test_fill_selector_both_errors(client: Client, flask_server: str) -> N
 
 
 async def test_fill_selector_neither_errors(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/fill", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/fill")
     result = tool_text(await client.call_tool("fill", {"profile": PROFILE, "value": "x"}))
     assert "error" in result.lower()
     assert "exactly one of uid or selector" in result.lower()
@@ -157,7 +166,7 @@ async def test_fill_observe_snapshot_yields_usable_uids(client: Client, flask_se
         )
     )
     assert "filled" in result.lower()
-    assert "--- observation (snapshot) ---" in result
+    assert OBSERVATION_SNAPSHOT_MARK in result
 
     # The fresh observation exposes usable uids for the rest of the form. `extract_uid`
     # already guarantees the "eN" shape, so asserting that shape proves nothing: the

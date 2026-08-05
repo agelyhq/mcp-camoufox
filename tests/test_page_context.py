@@ -14,11 +14,18 @@ from typing import TYPE_CHECKING
 import pytest
 
 from camoufox_mcp.tools._page_line import (
-    _EVIDENCE_WINDOW_S,
+    EVIDENCE_WINDOW_S,
     PAGE_CONTEXT_TOOLS,
     SETTLING_TOOLS,
 )
-from tests.helpers import PROFILE, evaluate, tool_text
+from tests.helpers import (
+    OBSERVATION_SNAPSHOT_MARK,
+    PROFILE,
+    RENDERED_STALE_UID,
+    evaluate,
+    open_page,
+    tool_text,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -70,7 +77,7 @@ async def test_every_declared_tool_exists(client: Client) -> None:
 
 async def test_click_that_navigates_reports_the_new_page(client: Client, flask_server: str) -> None:
     """The whole point: the agent learns where the click landed, without asking."""
-    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/click")
 
     result = await _click(client, selector=".nav a")
 
@@ -88,7 +95,7 @@ def test_press_key_is_outside_the_settling_set() -> None:
     """press_key must not be a settling tool, asserted on the set rather than on a clock.
 
     The cost this guards is real: confirming that a tab did not move takes up to
-    _EVIDENCE_WINDOW_S, and press_key has a 4.1 ms median over 903 real calls, 96% of them
+    EVIDENCE_WINDOW_S, and press_key has a 4.1 ms median over 903 real calls, 96% of them
     arrow keys inside a game loop, so paying it would multiply the tool's cost by roughly
     50 for a case where a keystroke rarely navigates.
 
@@ -104,7 +111,7 @@ def test_press_key_is_outside_the_settling_set() -> None:
     """
     assert "press_key" not in SETTLING_TOOLS, (
         "press_key is back in the settling set: every keystroke now waits up to "
-        f"{_EVIDENCE_WINDOW_S * 1000:.0f}ms to confirm a page it almost never moved"
+        f"{EVIDENCE_WINDOW_S * 1000:.0f}ms to confirm a page it almost never moved"
     )
     assert "press_key" not in PAGE_CONTEXT_TOOLS, (
         "press_key would emit a [page] line, which is the same cost by another name"
@@ -114,7 +121,7 @@ def test_press_key_is_outside_the_settling_set() -> None:
 
 
 async def test_click_that_stays_put_reports_nothing(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/click")
 
     result = await _click(client, selector="#btn-single")
 
@@ -128,7 +135,7 @@ async def test_page_line_matches_the_snapshot_header(client: Client, flask_serve
     They sit either side of the Python/JS boundary, so no constant can be shared and
     only a test can hold them together.
     """
-    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/click")
     appended = (await _click(client, selector=".nav a")).splitlines()[-1]
 
     snapshot = tool_text(await client.call_tool("snapshot", {"profile": PROFILE}))
@@ -137,7 +144,7 @@ async def test_page_line_matches_the_snapshot_header(client: Client, flask_serve
 
 
 async def test_snapshot_is_unchanged(client: Client, flask_server: str) -> None:
-    await client.call_tool("navigate", {"url": f"{flask_server}/snapshot", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/snapshot")
 
     result = tool_text(await client.call_tool("snapshot", {"profile": PROFILE}))
 
@@ -149,11 +156,11 @@ async def test_observe_snapshot_never_duplicates_the_page_line(
     client: Client, flask_server: str
 ) -> None:
     """A click that stays put: 1 page line, from the observation's own header."""
-    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/click")
 
     result = await _click(client, selector="#btn-single", observe="snapshot")
 
-    assert "--- observation (snapshot) ---" in result
+    assert OBSERVATION_SNAPSHOT_MARK in result
     assert result.count("[page] ") == 1, result
     assert f"[page] Click Test | {flask_server}/click" in result, result
 
@@ -209,11 +216,11 @@ async def test_errors_stay_one_line_and_the_move_is_reported_next(
     must still be exactly one line, and the move must surface on the next call in
     the set that succeeds rather than being lost.
     """
-    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": PROFILE})
+    await open_page(client, f"{flask_server}/click")
     await evaluate(client, PROFILE, "location.hash = 'moved'")
 
     failed = await _click(client, uid="e999")
-    assert failed == "Error: ValueError: unknown or stale uid 'e999'; take a new snapshot", failed
+    assert failed == RENDERED_STALE_UID.format(uid="e999"), failed
 
     # press_key is outside the set, so it neither reports the move nor consumes it.
     quiet = tool_text(await client.call_tool("press_key", {"profile": PROFILE, "key": "Escape"}))

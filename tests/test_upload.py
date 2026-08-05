@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import json
-import tempfile
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from camoufox_mcp.dom import MAX_UPLOAD_BYTES
 from tests.helpers import PROFILE, evaluate, goto_and_find, tool_text
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from fastmcp import Client
 
 # Poll the output node until the async fetch resolves, instead of a blind sleep.
@@ -39,85 +39,69 @@ async def _assert_server_received(
     assert json.loads(body) == {"filename": name, "content_type": content_type, "size": size}
 
 
-async def test_upload_file(client: Client, flask_server: str) -> None:
+async def test_upload_file(client: Client, tmp_path: Path, flask_server: str) -> None:
     uid = await goto_and_find(client, f"{flask_server}/upload", PROFILE, "input:file")
 
     payload = b"test content for upload"
-    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
-        f.write(payload)
-        tmp_path = f.name
-
-    try:
-        result = tool_text(
-            await client.call_tool(
-                "upload_file",
-                {"profile": PROFILE, "uid": uid, "file_path": tmp_path},
-            )
-        )
-        assert "uploaded" in result.lower()
-
-        await _assert_server_received(
-            client,
-            name=Path(tmp_path).name,
-            size=len(payload),
-            content_type="text/plain",
-        )
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
-
-
-async def test_upload_missing_file(client: Client, flask_server: str) -> None:
-    uid = await goto_and_find(client, f"{flask_server}/upload", PROFILE, "input:file")
+    upload = tmp_path / "upload.txt"
+    upload.write_bytes(payload)
 
     result = tool_text(
         await client.call_tool(
             "upload_file",
-            {"profile": PROFILE, "uid": uid, "file_path": "/tmp/nonexistent_file_12345.txt"},
+            {"profile": PROFILE, "uid": uid, "file_path": str(upload)},
         )
     )
-    assert "error" in result.lower()
+    assert "uploaded" in result.lower()
+
+    await _assert_server_received(
+        client, name=upload.name, size=len(payload), content_type="text/plain"
+    )
 
 
-async def test_upload_via_label_trigger(client: Client, flask_server: str) -> None:
+async def test_upload_missing_file(client: Client, tmp_path: Path, flask_server: str) -> None:
+    """The path is named back, so the caller can see which one it got wrong."""
+    uid = await goto_and_find(client, f"{flask_server}/upload", PROFILE, "input:file")
+    absent = tmp_path / "nowhere.txt"
+
+    result = tool_text(
+        await client.call_tool(
+            "upload_file",
+            {"profile": PROFILE, "uid": uid, "file_path": str(absent)},
+        )
+    )
+    assert result == f"Error: ValueError: '{absent}' is not a readable file", result
+
+
+async def test_upload_via_label_trigger(client: Client, tmp_path: Path, flask_server: str) -> None:
     """The uid may point at the <label> that controls the input, not the input itself."""
     uid = await goto_and_find(client, f"{flask_server}/upload", PROFILE, "Choose a file")
 
     payload = b"through the label"
-    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as handle:
-        handle.write(payload)
-        tmp_path = handle.name
+    upload = tmp_path / "labelled.txt"
+    upload.write_bytes(payload)
 
-    try:
-        result = tool_text(
-            await client.call_tool(
-                "upload_file", {"profile": PROFILE, "uid": uid, "file_path": tmp_path}
-            )
+    result = tool_text(
+        await client.call_tool(
+            "upload_file", {"profile": PROFILE, "uid": uid, "file_path": str(upload)}
         )
-        assert "uploaded" in result.lower(), result
-        await _assert_server_received(
-            client,
-            name=Path(tmp_path).name,
-            size=len(payload),
-            content_type="text/plain",
-        )
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
+    )
+    assert "uploaded" in result.lower(), result
+    await _assert_server_received(
+        client, name=upload.name, size=len(payload), content_type="text/plain"
+    )
 
 
-async def test_upload_too_large(client: Client, flask_server: str) -> None:
+async def test_upload_too_large(client: Client, tmp_path: Path, flask_server: str) -> None:
     """The bytes cross the protocol, so a size ceiling exists where there was none."""
     uid = await goto_and_find(client, f"{flask_server}/upload", PROFILE, "input:file")
 
-    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as handle:
-        handle.write(b"0" * (MAX_UPLOAD_BYTES + 1))
-        tmp_path = handle.name
+    oversized = tmp_path / "oversized.bin"
+    oversized.write_bytes(b"0" * (MAX_UPLOAD_BYTES + 1))
 
-    try:
-        result = tool_text(
-            await client.call_tool(
-                "upload_file", {"profile": PROFILE, "uid": uid, "file_path": tmp_path}
-            )
+    result = tool_text(
+        await client.call_tool(
+            "upload_file", {"profile": PROFILE, "uid": uid, "file_path": str(oversized)}
         )
-        assert f"upload_file accepts at most {MAX_UPLOAD_BYTES} bytes" in result
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
+    )
+    assert f"upload_file accepts at most {MAX_UPLOAD_BYTES} bytes" in result

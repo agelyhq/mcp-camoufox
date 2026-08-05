@@ -5,14 +5,10 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.helpers import isolate_camoufox_env
+from tests.helpers import ABSENT_DISPLAY, isolate_camoufox_env
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-# A display number that cannot exist on the runner, used to prove a launch never
-# silently falls back to the ambient DISPLAY.
-ABSENT_DISPLAY = ":424"
 
 
 def _kwargs(
@@ -139,6 +135,6 @@ def test_virtual_display_stays_linux_only(data_dir: Path, monkeypatch: pytest.Mo
     """
     from camoufox_mcp.sessions import launch
 
-    monkeypatch.setattr(launch, "_IS_LINUX", False)
+    monkeypatch.setattr(launch, "IS_LINUX", False)
     with pytest.raises(ValueError, match="requires Linux"):
         _kwargs(data_dir, monkeypatch, CAMOUFOX_HEADLESS="virtual")

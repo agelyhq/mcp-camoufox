@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 import pytest
 from fastmcp import Client
 
-from tests.helpers import isolate_camoufox_env, tool_text
+from camoufox_mcp.config import ServerConfig
+from tests.helpers import ABSENT_DISPLAY, isolate_camoufox_env, server_for, tool_text
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -16,10 +17,6 @@ if TYPE_CHECKING:
 # visible window) is deliberately excluded: it needs a working desktop GL stack and
 # cannot be exercised headlessly, so the deployed config uses "virtual" instead.
 _HEADLESS_MODES = ["true", "virtual"]
-
-# A display number that cannot exist on the runner. Firefox refuses to start on it,
-# which is what gives the isolation test its teeth.
-_ABSENT_DISPLAY = ":424"
 
 
 def test_isolation_helper_honours_an_ambient_mode(
@@ -35,8 +32,6 @@ def test_isolation_helper_honours_an_ambient_mode(
     deterministic and display-less, an ambient value is honoured, and an explicit
     override still beats both so a test can pin the mode its assertion depends on.
     """
-    from camoufox_mcp.config import ServerConfig
-
     monkeypatch.delenv("CAMOUFOX_HEADLESS", raising=False)
     isolate_camoufox_env(monkeypatch, data_dir)
     assert ServerConfig.from_env().headless is True
@@ -65,12 +60,7 @@ async def test_display_mode_launches(
     if mode == "virtual" and shutil.which("Xvfb") is None:
         pytest.skip("Xvfb is not installed; cannot exercise virtual display mode")
 
-    isolate_camoufox_env(monkeypatch, data_dir, CAMOUFOX_HEADLESS=mode)
-
-    from camoufox_mcp.bootstrap import build_server
-    from camoufox_mcp.config import ServerConfig
-
-    server = build_server(ServerConfig.from_env())
+    server = server_for(monkeypatch, data_dir, CAMOUFOX_HEADLESS=mode)
     async with Client(server) as client:
         result = tool_text(
             await client.call_tool("navigate", {"profile": "display", "url": f"{flask_server}/"})
@@ -102,13 +92,9 @@ async def test_navigate_headless_param_creates_virtual(
     if shutil.which("Xvfb") is None:
         pytest.skip("Xvfb is not installed; cannot exercise virtual display mode")
 
-    isolate_camoufox_env(monkeypatch, data_dir, CAMOUFOX_HEADLESS="true")
-    monkeypatch.setenv("DISPLAY", _ABSENT_DISPLAY)
+    server = server_for(monkeypatch, data_dir, CAMOUFOX_HEADLESS="true")
+    monkeypatch.setenv("DISPLAY", ABSENT_DISPLAY)
 
-    from camoufox_mcp.bootstrap import build_server
-    from camoufox_mcp.config import ServerConfig
-
-    server = build_server(ServerConfig.from_env())
     async with Client(server) as client:
         result = tool_text(
             await client.call_tool(
@@ -118,7 +104,7 @@ async def test_navigate_headless_param_creates_virtual(
         )
 
     assert "Navigated to" in result, result
-    assert os.environ["DISPLAY"] == _ABSENT_DISPLAY, (
+    assert os.environ["DISPLAY"] == ABSENT_DISPLAY, (
         "a virtual session must not repoint the server process at its Xvfb display"
     )
 
@@ -129,12 +115,7 @@ async def test_navigate_headless_invalid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An unknown headless value is rejected before any browser launches."""
-    isolate_camoufox_env(monkeypatch, data_dir)
-
-    from camoufox_mcp.bootstrap import build_server
-    from camoufox_mcp.config import ServerConfig
-
-    server = build_server(ServerConfig.from_env())
+    server = server_for(monkeypatch, data_dir)
     async with Client(server) as client:
         result = tool_text(
             await client.call_tool(
@@ -160,12 +141,7 @@ async def test_navigate_headless_creation_only(
     the mode keeps both halves true under an ambient CAMOUFOX_HEADLESS=virtual run,
     where the first navigate would otherwise need an Xvfb of its own.
     """
-    isolate_camoufox_env(monkeypatch, data_dir, CAMOUFOX_HEADLESS="true")
-
-    from camoufox_mcp.bootstrap import build_server
-    from camoufox_mcp.config import ServerConfig
-
-    server = build_server(ServerConfig.from_env())
+    server = server_for(monkeypatch, data_dir, CAMOUFOX_HEADLESS="true")
     async with Client(server) as client:
         first = tool_text(
             await client.call_tool("navigate", {"profile": "hco", "url": f"{flask_server}/"})
