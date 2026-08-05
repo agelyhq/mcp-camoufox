@@ -8,13 +8,16 @@ that gap without a dedicated tool.
 from __future__ import annotations
 
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import TYPE_CHECKING
 
 import pytest
 
-from camoufox_mcp.tools._page_line import _EVIDENCE_WINDOW_S, PAGE_CONTEXT_TOOLS
+from camoufox_mcp.tools._page_line import (
+    _EVIDENCE_WINDOW_S,
+    PAGE_CONTEXT_TOOLS,
+    SETTLING_TOOLS,
+)
 from tests.helpers import PROFILE, evaluate, tool_text
 
 if TYPE_CHECKING:
@@ -81,47 +84,33 @@ async def test_click_that_navigates_reports_the_new_page(client: Client, flask_s
     assert again == "Reloaded: MCP Tool Test Pages", again
 
 
-async def test_press_key_does_not_pay_the_confirmation_cost(
-    client: Client, flask_server: str
-) -> None:
-    """press_key is out of the set, so a keystroke never waits for a confirmation.
+def test_press_key_is_outside_the_settling_set() -> None:
+    """press_key must not be a settling tool, asserted on the set rather than on a clock.
 
-    The suffix spends up to ``_EVIDENCE_WINDOW_S`` proving a tab that did not move
-    did not move. press_key has a 4.1 ms median over 903 real calls, 96% of them
-    arrow keys inside a game loop, so paying that window on every one of them
-    multiplies the cost of the tool by roughly 50 for a case where a keystroke
-    rarely navigates.
+    The cost this guards is real: confirming that a tab did not move takes up to
+    _EVIDENCE_WINDOW_S, and press_key has a 4.1 ms median over 903 real calls, 96% of them
+    arrow keys inside a game loop, so paying it would multiply the tool's cost by roughly
+    50 for a case where a keystroke rarely navigates.
 
-    The tab has a recorded baseline here (the navigate above showed its URL), which
-    is the exact condition under which the confirmation poll used to run.
+    It is asserted structurally because timing cannot express it. A tool only spends the
+    window when there is evidence of a navigation to settle, so on a page that stays put
+    NEITHER press_key nor a settling tool waits, and the 2 measure the same thing: machine
+    load. Measured under load on a static page, press_key took 218 ms against 230 ms for
+    click_at, and an earlier version of this test failed on that noise while the behaviour
+    was correct.
 
-    The assertion is comparative on purpose. An absolute threshold measures the machine
-    as much as the code: a loaded runner makes an honest 4 ms call take 126 ms and the
-    test fails for a reason that has nothing to do with the tool. So it times a tool
-    that DOES pay the window on the same tab, moments apart, and requires the keystroke
-    to come back clearly sooner. Both calls carry the same load, so what is left is the
-    window itself.
+    The behavioural half, that press_key neither reports a move nor consumes it, is
+    asserted end to end in test_errors_stay_one_line_and_the_move_is_reported_next.
     """
-    await client.call_tool("navigate", {"url": f"{flask_server}/press-key", "profile": PROFILE})
-
-    started = time.perf_counter()
-    result = tool_text(
-        await client.call_tool("press_key", {"profile": PROFILE, "key": "ArrowRight"})
+    assert "press_key" not in SETTLING_TOOLS, (
+        "press_key is back in the settling set: every keystroke now waits up to "
+        f"{_EVIDENCE_WINDOW_S * 1000:.0f}ms to confirm a page it almost never moved"
     )
-    keystroke = time.perf_counter() - started
-
-    assert result == "Pressed ArrowRight", result
-
-    # click_at is in the settling set and lands on nothing, so its whole extra cost over
-    # a keystroke is the confirmation window.
-    started = time.perf_counter()
-    tool_text(await client.call_tool("click_at", {"profile": PROFILE, "x": 2, "y": 2}))
-    confirmed = time.perf_counter() - started
-
-    assert keystroke < confirmed - _EVIDENCE_WINDOW_S / 2, (
-        f"press_key took {keystroke * 1000:.0f}ms against {confirmed * 1000:.0f}ms for a "
-        f"tool that pays the {_EVIDENCE_WINDOW_S * 1000:.0f}ms window: it is paying it too"
+    assert "press_key" not in PAGE_CONTEXT_TOOLS, (
+        "press_key would emit a [page] line, which is the same cost by another name"
     )
+    # The set it is out of must not be empty, or this passes for the wrong reason.
+    assert {"click", "click_at", "fill"} <= SETTLING_TOOLS, SETTLING_TOOLS
 
 
 async def test_click_that_stays_put_reports_nothing(client: Client, flask_server: str) -> None:
