@@ -32,7 +32,7 @@ async def ensure_browser_present(config: ServerConfig) -> None:
     (when the pinned build is absent) blocks to download it.
     Honors ``CAMOUFOX_AUTO_UPDATE=false`` (then a missing build is a hard error).
     """
-    if _binary_present(config):
+    if binary_present(config):
         await _reassert_pin(config)
         return
     if not config.auto_update:
@@ -42,13 +42,13 @@ async def ensure_browser_present(config: ServerConfig) -> None:
             "first."
         )
     try:
-        await asyncio.to_thread(_update_browser, config.browser_version)
-        await asyncio.to_thread(_update_geoip)
+        await asyncio.to_thread(update_browser, config.browser_version)
+        await asyncio.to_thread(update_geoip)
     except Exception as exc:
         raise BrowserSetupError(
             f"Camoufox download failed and build {_wanted(config)} is not present: {exc}"
         ) from exc
-    _write_stamp(config)
+    write_update_stamp(config)
 
 
 async def _reassert_pin(config: ServerConfig) -> None:
@@ -94,9 +94,9 @@ def schedule_refresh(config: ServerConfig) -> asyncio.Task[None] | None:
 
 async def _refresh(config: ServerConfig) -> None:
     try:
-        await asyncio.to_thread(_update_browser, config.browser_version)
-        await asyncio.to_thread(_update_geoip)
-        _write_stamp(config)
+        await asyncio.to_thread(update_browser, config.browser_version)
+        await asyncio.to_thread(update_geoip)
+        write_update_stamp(config)
         logger.info("Camoufox browser and GeoIP database refreshed in background.")
     except asyncio.CancelledError:
         raise
@@ -120,7 +120,7 @@ def _is_due(config: ServerConfig) -> bool:
     return age > _CHECK_INTERVAL_S
 
 
-def _write_stamp(config: ServerConfig) -> None:
+def write_update_stamp(config: ServerConfig) -> None:
     stamp = _stamp_path(config)
     try:
         stamp.parent.mkdir(parents=True, exist_ok=True)
@@ -129,7 +129,7 @@ def _write_stamp(config: ServerConfig) -> None:
         logger.debug("Could not write update stamp", exc_info=True)
 
 
-def _installed_build(version: str) -> InstalledVersion | None:
+def installed_build(version: str) -> InstalledVersion | None:
     """The local install of ``version``, or ``None`` when it is not on disk.
 
     Reads only the ``browsers/`` tree, so it is offline and cheap. A cache we cannot
@@ -146,11 +146,11 @@ def _installed_build(version: str) -> InstalledVersion | None:
     return None
 
 
-def _binary_present(config: ServerConfig) -> bool:
+def binary_present(config: ServerConfig) -> bool:
     if config.camoufox_binary:
         return Path(config.camoufox_binary).exists()
     if config.browser_version:
-        if _installed_build(config.browser_version) is not None:
+        if installed_build(config.browser_version) is not None:
             return True
         # Absent. Call camoufox_path() for its side effect only: it purges a pre-0.5
         # flat cache layout, which must happen before we install into the versioned
@@ -174,7 +174,7 @@ def _any_binary_present() -> bool:
             return False
 
 
-def _update_browser(version: str | None) -> None:
+def update_browser(version: str | None) -> None:
     """Install ``version`` (idempotent), or chase the newest release when ``None``.
 
     A pin is a promise not to move: once the build is on disk this only re-asserts
@@ -192,12 +192,12 @@ def _update_browser(version: str | None) -> None:
             # which would read stdin, the MCP transport, and hang the server.
             CamoufoxUpdate().update(i_know_what_im_doing=True)
             return
-        if _installed_build(version) is None:
-            _install_build(version)
+        if installed_build(version) is None:
+            install_build(version)
         _activate(version)
 
 
-def _install_build(version: str) -> None:
+def install_build(version: str) -> None:
     from camoufox.pkgman import CamoufoxFetcher, list_available_versions
 
     for candidate in list_available_versions(include_prerelease=True):
@@ -214,12 +214,12 @@ def _install_build(version: str) -> None:
 def _activate(version: str) -> None:
     from camoufox.multiversion import set_active
 
-    installed = _installed_build(version)
+    installed = installed_build(version)
     if installed is not None and not installed.is_active:
         set_active(installed.relative_path)
 
 
-def _update_geoip() -> None:
+def update_geoip() -> None:
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         from camoufox.geolocation import download_mmdb
 

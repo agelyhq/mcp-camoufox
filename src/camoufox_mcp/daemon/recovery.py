@@ -55,8 +55,8 @@ _RESPAWN_COOLDOWN_S = 5.0
 # consecutive checks must agree before the call is cancelled. Two, not one, because a
 # Unix socket whose accept backlog is momentarily full also refuses connections; that
 # clears in milliseconds, so a second refusal a whole interval later is real.
-_WATCH_INTERVAL_S = 2.0
-_DEATH_CONFIRMATIONS = 2
+WATCH_INTERVAL_S = 2.0
+DEATH_CONFIRMATIONS = 2
 _LIVENESS_TIMEOUT_S = 2.0
 
 
@@ -64,7 +64,7 @@ class _DaemonVanishedError(Exception):
     """The daemon holding this request disappeared while it was outstanding."""
 
 
-def _proven_gone(config: ServerConfig, endpoint: DaemonEndpoint) -> bool:
+def proven_gone(config: ServerConfig, endpoint: DaemonEndpoint) -> bool:
     """True only on positive proof that nothing is listening on the control address.
 
     Deliberately not :func:`probe_health`, which folds every failure into ``None`` and
@@ -114,8 +114,8 @@ class DaemonRecovery:
         return health is not None
 
     async def is_gone(self) -> bool:
-        """True when the daemon is proven absent (see :func:`_proven_gone`)."""
-        return await asyncio.to_thread(_proven_gone, self._config, self._endpoint)
+        """True when the daemon is proven absent (see :func:`proven_gone`)."""
+        return await asyncio.to_thread(proven_gone, self._config, self._endpoint)
 
     async def respawn(self) -> bool:
         """Ensure a daemon is listening again, at most once per cooldown window."""
@@ -175,8 +175,8 @@ class DaemonRecoveryMiddleware(Middleware):
         request = asyncio.ensure_future(call_next(context))
         confirmations = 0
         try:
-            while confirmations < _DEATH_CONFIRMATIONS:
-                done, _ = await asyncio.wait({request}, timeout=_WATCH_INTERVAL_S)
+            while confirmations < DEATH_CONFIRMATIONS:
+                done, _ = await asyncio.wait({request}, timeout=WATCH_INTERVAL_S)
                 if done:
                     return request.result()
                 confirmations = confirmations + 1 if await self._recovery.is_gone() else 0

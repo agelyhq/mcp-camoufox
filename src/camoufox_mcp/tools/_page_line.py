@@ -52,13 +52,13 @@ PAGE_CONTEXT_TOOLS = SETTLING_TOOLS | frozenset({"go_back", "reload", NAVIGATE})
 #   click that stays put : no document request, no URL change, ever
 #
 # So the request is the early, reliable evidence and the URL change is the slow
-# confirmation. Wait _EVIDENCE_WINDOW_S for either; extend to _COMMIT_BUDGET_S only
+# confirmation. Wait EVIDENCE_WINDOW_S for either; extend to _COMMIT_BUDGET_S only
 # once a document request proves a navigation is really under way. A non-navigating
 # action therefore pays the short window once, and a real navigation gets a budget
 # that survives a network round trip. Anything slower still surfaces on the agent's
 # next call through Page.shown_url, so nothing is lost, only deferred.
 _POLL_INTERVAL_S = 0.01
-_EVIDENCE_WINDOW_S = 0.2
+EVIDENCE_WINDOW_S = 0.2
 _COMMIT_BUDGET_S = 1.5
 _RETRY_DELAY_S = 0.05
 
@@ -136,11 +136,11 @@ async def settled_url(page: Page, tool: str, expected: str | None) -> str:
     if tool not in SETTLING_TOOLS or expected is None or mark is None:
         return current
     started = time.monotonic()
-    budget = _EVIDENCE_WINDOW_S
+    budget = EVIDENCE_WINDOW_S
     while same_place(current, expected) and time.monotonic() - started < budget:
         await asyncio.sleep(_POLL_INTERVAL_S)
         current = page.url
-        if budget == _EVIDENCE_WINDOW_S and page.network.last_document_reqid > mark:
+        if budget == EVIDENCE_WINDOW_S and page.network.last_document_reqid > mark:
             budget = _COMMIT_BUDGET_S
     # The one place where "the agent was not told" can be a timing accident rather
     # than a decision, so leave the numbers behind for whoever reads the log.

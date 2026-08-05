@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 _PROBE_TIMEOUT_S = 2.0
 _SPAWN_LOCK_DEADLINE_S = 20.0
 _HEALTHY_DEADLINE_S = 20.0
-_ADDRESS_REMOVAL_DEADLINE_S = 15.0
+ADDRESS_REMOVAL_DEADLINE_S = 15.0
 _POLL_INTERVAL_S = 0.2
 
 
@@ -48,7 +48,7 @@ def ensure_daemon(config: ServerConfig, endpoint: DaemonEndpoint) -> None:
         logger.info("Replacing idle mismatched daemon")
         _request_shutdown(config, endpoint)
         _wait_unpublished(config, endpoint)
-    _spawn_locked(config, endpoint, identity)
+    spawn_locked(config, endpoint, identity)
 
 
 def _warn_reusing_mismatched(reason: str) -> None:
@@ -94,14 +94,14 @@ def _wait_unpublished(config: ServerConfig, endpoint: DaemonEndpoint) -> None:
     Waiting for the advert to actually disappear guarantees the predecessor is fully
     inert before a successor is spawned at the same location.
     """
-    deadline = time.monotonic() + _ADDRESS_REMOVAL_DEADLINE_S
+    deadline = time.monotonic() + ADDRESS_REMOVAL_DEADLINE_S
     while time.monotonic() < deadline:
         if endpoint.resolve(config) is None:
             return
         time.sleep(_POLL_INTERVAL_S)
 
 
-def _spawn_locked(config: ServerConfig, endpoint: DaemonEndpoint, identity: DaemonIdentity) -> None:
+def spawn_locked(config: ServerConfig, endpoint: DaemonEndpoint, identity: DaemonIdentity) -> None:
     paths.ensure_daemon_dir(config)  # 0o700 parent gates the lock and log before spawn
     lock_path = paths.lock_path(config)
     lock = FileLock(str(lock_path))
@@ -143,7 +143,7 @@ def _reclaim_advert(config: ServerConfig, endpoint: DaemonEndpoint) -> bool:
 
 
 def _popen_daemon(config: ServerConfig) -> None:
-    # daemon_dir already exists (0o700) via ensure_daemon_dir in _spawn_locked.
+    # daemon_dir already exists (0o700) via ensure_daemon_dir in spawn_locked.
     log_file = open(paths.log_path(config), "ab")  # noqa: SIM115 (child owns the fd)
     try:
         subprocess.Popen(

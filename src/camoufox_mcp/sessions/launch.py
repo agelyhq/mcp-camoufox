@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from camoufox_mcp.config import ServerConfig
     from camoufox_mcp.sessions.init_options import SessionInitOptions
 
-_IS_LINUX = sys.platform.startswith("linux")
+IS_LINUX = sys.platform.startswith("linux")
 
 # Humanised cursor movement is opt-in (``CAMOUFOX_HUMANIZE``, off by default): with it
 # on, Firefox intermittently stops answering the Juggler protocol part-way through a
@@ -46,7 +46,7 @@ def build_launch_kwargs(
     timeout (daijro/camoufox#666).
     """
     headless = config.headless if opts.headless is None else opts.headless
-    if headless == "virtual" and not _IS_LINUX:
+    if headless == "virtual" and not IS_LINUX:
         raise ValueError(
             "headless 'virtual' requires Linux (it spawns an Xvfb X server); "
             "use 'true' on this platform"
