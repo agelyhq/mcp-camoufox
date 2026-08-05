@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from camoufox_mcp.sessions.log import PreservingLog
 
 if TYPE_CHECKING:
     from playwright.async_api import ConsoleMessage, Page
-
-MAX_ENTRIES = 1000
 
 
 @dataclass
@@ -20,46 +19,54 @@ class ConsoleEntry:
 
 
 class ConsoleMonitor:
+    """The console output of one tab, kept in a :class:`PreservingLog`."""
+
     def __init__(self) -> None:
-        self._entries: deque[ConsoleEntry] = deque(maxlen=MAX_ENTRIES)
-        self._preserved: deque[ConsoleEntry] = deque(maxlen=MAX_ENTRIES)
-        self._next_msgid: int = 0
+        self._log: PreservingLog[ConsoleEntry] = PreservingLog()
 
     def attach(self, page: Page) -> None:
-        page.on("console", self._on_console)
-        page.on("framenavigated", self._on_navigation)
+        """Subscribe to console output for one tab.
 
-    def _on_navigation(self, _: Any) -> None:
-        self._preserved.extend(self._entries)
-        while len(self._preserved) > MAX_ENTRIES:
-            self._preserved.popleft()
-        self._entries.clear()
+        Do not remove this subscription hoping to make the tab quieter: it does not.
+        When page script logs a DOM node, the Firefox driver builds an element handle
+        for that argument inside its own event handler, before any subscriber is
+        consulted (``_onConsole`` -> ``createHandle3`` -> the ``ElementHandle``
+        constructor, coreBundle.js:43478, :42843, :16039), and that constructor
+        evaluates the driver's injected script into the world the node lives in. The
+        arguments are built while calling ``addConsoleMessage`` (coreBundle.js:19925),
+        which only then checks whether anyone is listening, so the artifact appears
+        with or without this handler. Measured both ways; pinned by
+        tests/test_no_markers.py. Only ``msg.type``, ``msg.text`` and ``msg.location``
+        are read here, never ``msg.args``, which is the one thing on this object that
+        would create further handles of our own accord.
+        """
+        page.on("console", self._on_console)
+        self._log.attach(page)
 
     def _on_console(self, msg: ConsoleMessage) -> None:
-        msgid = self._next_msgid
-        self._next_msgid += 1
-        entry = ConsoleEntry(
-            msgid=msgid,
-            level=msg.type,
-            text=msg.text,
-            url=msg.location.get("url", ""),
-            line_number=msg.location.get("lineNumber", 0),
+        self._log.record(
+            ConsoleEntry(
+                msgid=self._log.next_id(),
+                level=msg.type,
+                text=msg.text,
+                url=msg.location.get("url", ""),
+                line_number=msg.location.get("lineNumber", 0),
+            )
         )
-        self._entries.append(entry)
 
     def list_entries(
         self,
         *,
         levels: list[str] | None = None,
-        limit: int = 50,
+        page_size: int | None = None,
+        page_idx: int = 0,
         include_preserved: bool = False,
-    ) -> list[ConsoleEntry]:
-        source: list[ConsoleEntry] = list(self._entries)
-        if include_preserved:
-            source = list(self._preserved) + source
-
-        if levels:
-            levels_set = {lv.lower() for lv in levels}
-            source = [e for e in source if e.level in levels_set]
-
-        return source[-limit:]
+    ) -> tuple[list[ConsoleEntry], int]:
+        """Captured messages, oldest first, and the total that matched before paging."""
+        wanted = {level.lower() for level in levels} if levels else None
+        return self._log.select(
+            keep=None if wanted is None else (lambda entry: entry.level in wanted),
+            page_size=page_size,
+            page_idx=page_idx,
+            include_preserved=include_preserved,
+        )

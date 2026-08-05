@@ -7,11 +7,16 @@ import shutil
 import tempfile
 import zipfile
 from pathlib import Path
-from urllib.request import urlretrieve
+from urllib.request import urlopen
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_CACHE_DIR = Path.home() / ".cache" / "camoufox-mcp" / "addons"
+# Per-socket-operation deadline on an addon download. Without one, a host that accepts
+# the connection and then says nothing holds the download thread forever, and with it
+# the session creation that awaits it: in daemon mode that is one unreachable addon
+# host against every client the process serves. A timeout is not fatal here, it is the
+# per-addon warning below, and the browser launches without that addon.
+DOWNLOAD_TIMEOUT = 30.0
 
 
 def _url_cache_key(url: str) -> str:
@@ -19,8 +24,20 @@ def _url_cache_key(url: str) -> str:
 
 
 def _download_sync(url: str, dest: Path) -> None:
+    """Fetch one XPI to ``dest``, under a deadline, and only ever whole.
+
+    The bytes land in a sibling ``.part`` file and are renamed into place at the end,
+    so an interrupted download cannot leave a truncated archive that every later run
+    would find in the cache and trust.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
-    urlretrieve(url, dest)
+    partial = dest.with_name(f"{dest.name}.part")
+    try:
+        with urlopen(url, timeout=DOWNLOAD_TIMEOUT) as response, partial.open("wb") as out:
+            shutil.copyfileobj(response, out)
+        partial.replace(dest)
+    finally:
+        partial.unlink(missing_ok=True)
 
 
 def _extract_xpi(xpi_path: Path, dest_dir: Path) -> None:
@@ -33,9 +50,10 @@ def _extract_xpi(xpi_path: Path, dest_dir: Path) -> None:
 
 async def prepare_addons(
     urls: tuple[str, ...],
-    cache_dir: Path = _DEFAULT_CACHE_DIR,
+    *,
+    cache_dir: Path,
 ) -> tuple[list[str], Path | None]:
-    """Download (cached) and extract addons. Returns (addon_dirs, temp_root)."""
+    """Download (cached in ``cache_dir``) and extract addons. Returns (addon_dirs, temp_root)."""
     if not urls:
         return [], None
 
