@@ -3,13 +3,16 @@
 One session arms the probes of :mod:`tests.probes` on an inert page and then drives every
 uid-consuming path over it. Nothing may be written to the DOM, no branded event may be
 dispatched, no observer may be constructed in the page realm, and no listener may appear
-on window. A second test proves the probes themselves work, so a silently broken probe
-cannot pass everything.
+on window. 2 controls answer the "compared with what?" question: 1 proves the probes fire
+on each signal, the other that the extension reading below names an extension when there
+is one, so neither a broken probe nor a blind reading can pass everything.
 
-The claim is about what THIS server does. The 2 other actors that can reach the page, the
-browser's own extension and the HTML parser, are dealt with where the probes are defined,
-so a record read here is ours or it is the browser's and named as such. The one
-driver-level artifact this server cannot prevent is pinned in
+The claim is about what THIS server does, so the session runs with no extension at all:
+this project's own default addon is dropped and Camoufox's bundled uBlock Origin is
+excluded, and the browser's own records are read back to prove it rather than trusting the
+setting. That leaves this server, the page's own script and the driver as the only things
+able to write to the page: the HTML parser is kept out by arming the probes on a finished
+document only, and the one driver-level artifact this server cannot prevent is pinned in
 :mod:`tests.test_driver_footprint`.
 """
 
@@ -18,11 +21,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from fastmcp import Client
 
 from tests.helpers import PROFILE, evaluate, extract_uid, open_page, tool_text
 from tests.probes import (
     INTERCEPTOR_EVENTS,
+    UBO_ID,
     arm_probes,
+    extensions_after_closing,
     probe_server,
     probes_after_the_leak_window,
     probes_when,
@@ -32,7 +38,7 @@ from tests.probes import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from fastmcp import Client, FastMCP
+    from fastmcp import FastMCP
 
 
 @pytest.fixture
@@ -82,7 +88,7 @@ async def _drive_every_uid_path(client: Client, upload: str) -> None:
 
 
 async def test_no_markers_on_any_uid_path(
-    client: Client, tmp_path: Path, flask_server: str
+    client: Client, tmp_path: Path, data_dir: Path, flask_server: str
 ) -> None:
     await open_page(client, f"{flask_server}/probe")
     await arm_probes(client)
@@ -95,7 +101,9 @@ async def test_no_markers_on_any_uid_path(
 
     assert probes["marks"] == [], "a target-marking event reached the page"
     # The tallies below ride along: this assertion is the one that has fired on a runner,
-    # and the 2 after it never got to say whether they were clean.
+    # and the 2 after it never got to say whether they were clean. What it fired on then was
+    # an extension's work, which is why the session now runs with none and the closing
+    # assertion of this test measures that rather than trusting the setting that asks for it.
     assert probes["mutations"] == [], (
         f"the page recorded mutations: {probes['mutations']} "
         f"(mo={probes['mo']}, listeners={probes['listeners']})"
@@ -114,6 +122,26 @@ async def test_no_markers_on_any_uid_path(
     )
     assert leaked == "0"
     assert await evaluate(client, PROFILE, "Object.getOwnPropertySymbols(window).length") == "0"
+
+    # Last, because it ends the session that everything above measured: this is that very
+    # browser saying which extensions it held, and every verdict above is about us only if
+    # the answer is none.
+    assert await extensions_after_closing(client, data_dir) == []
+
+
+async def test_the_extension_measurement_detects_camoufoxs_own_addon(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch, flask_server: str
+) -> None:
+    """Control for the reading above: with the setting on, the browser names uBlock Origin.
+
+    An empty list is what the test above ends on, and an instrument that always answers
+    empty would satisfy it forever. This launches the same server with Camoufox's bundled
+    addon left in, changing nothing else, and the same reading has to name it.
+    """
+    server = probe_server(monkeypatch, data_dir, bundled_addons="true")
+    async with Client(server) as control:
+        await open_page(control, f"{flask_server}/probe")
+        assert await extensions_after_closing(control, data_dir) == [UBO_ID]
 
 
 async def test_probe_instruments_actually_detect(client: Client, flask_server: str) -> None:
