@@ -13,20 +13,10 @@ if TYPE_CHECKING:
 def register(mcp: FastMCP, deps: ToolDeps) -> None:
     @tool(mcp, deps)
     async def select_page(profile: str, page_idx: int) -> str:
-        """Make a tab the active one for subsequent tool calls.
-
-        Subsequent tools (navigate, snapshot, click, ...) act on the active tab.
-        Use `list_pages` to discover valid indices.
+        """Make a tab the active one, which every later call then acts on.
 
         Args:
-            profile: An already-active session identifier.
-            page_idx: Stable index of the tab to activate (from `list_pages`).
-
-        Returns:
-            "Selected tab [<page_idx>]: <title> (<url>)".
-
-        Errors:
-            Returns "Error: ValueError: ..." if no tab has the given index.
+            page_idx: Stable tab index, from ``list_pages``.
         """
         session = await get_session(deps, profile)
         session.select_page(page_idx)

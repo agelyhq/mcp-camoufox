@@ -18,6 +18,11 @@
     <input type="text" id="ff-city" placeholder="City"
            oninput="document.getElementById('ff-city-out').textContent = this.value">
     <div id="ff-city-out" class="output"></div>
+
+    <label for="ff-optin">Subscribe</label>
+    <input type="checkbox" id="ff-optin"
+           onchange="document.getElementById('ff-optin-out').textContent = this.checked ? 'yes' : 'no'">
+    <div id="ff-optin-out" class="output">no</div>
   </form>
 </div>
 {% endblock %}

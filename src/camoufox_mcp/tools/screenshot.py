@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from fastmcp.utilities.types import Image
 from PIL import Image as PILImage
 
-from camoufox_mcp.dom import resolve_uid_or_raise, scroll_into_view
+from camoufox_mcp.dom import resolve
 from camoufox_mcp.tools._base import get_page, get_session, tool
 
 if TYPE_CHECKING:
@@ -20,55 +20,28 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
     async def screenshot(
         profile: str,
         full_page: bool = False,
-        uid: str = "",
+        uid: str | None = None,
         max_width: int | None = None,
     ) -> Image | list[str | Image]:
-        """Capture a PNG screenshot of the active tab.
+        """Capture a PNG of the active tab's viewport. The only tool returning an image.
 
-        This is the only tool that returns an image rather than text. By default it
-        captures the current viewport. Set ``full_page`` to capture the entire
-        scrollable page, or pass a ``uid`` to crop to a single element's bounding
-        box (from the most recent snapshot).
-
-        Params:
-            profile: The browser profile whose active tab is captured.
-            full_page: When true, capture the full scrollable page height instead
-                of just the visible viewport. Ignored when ``uid`` is given.
-            uid: Optional ``eN`` element uid (from ``snapshot``) to crop the shot to
-                that element only. The element is scrolled into view first. Leave
-                empty to screenshot the page/viewport.
-            max_width: Optional pixel cap on the returned image width. When the
-                captured image is wider, it is downscaled (aspect ratio preserved)
-                to cut image-token cost. In that case the tool returns a two-item
-                list ``[note, image]`` where ``note`` reports the scale and the
-                factor to multiply image coordinates by before ``click_at`` (the
-                image is smaller than the page it represents). When unset, or when
-                the capture is already at or below ``max_width``, the bare image is
-                returned unchanged. ``max_width <= 0`` disables the cap.
-
-        Returns:
-            A PNG image of the requested region, or ``[note, image]`` when the image
-            was downscaled to honor ``max_width``.
-
-        Errors (returned as an "Error:"/"Timeout:" string, never raised):
-            - "Error: ValueError: unknown or stale uid '<uid>'; take a new
-              snapshot" if the uid is missing or stale.
-            - "Error: ProfileInUseError: ..." if the profile lock is held.
+        Args:
+            full_page: Capture the whole scrollable page. Ignored with ``uid``.
+            uid: Crop to that element's box, scrolling it into view first.
+            max_width: Downscale a wider capture to this width, aspect ratio kept.
+                The tool then returns ``[note, image]``, the note carrying the factor
+                to multiply image coordinates by before ``click_at``. 0 or less means
+                no downscaling, same as omitting it.
         """
         session = await get_session(deps, profile)
         page = get_page(session)
-        if uid:
-            await scroll_into_view(page, uid)
-            info = await resolve_uid_or_raise(page, uid)
-            width = float(info["width"])
-            height = float(info["height"])
-            clip = {
-                "x": float(info["x"]) - width / 2,
-                "y": float(info["y"]) - height / 2,
-                "width": width,
-                "height": height,
-            }
-            png = await page.raw.screenshot(type="png", clip=clip)
+        if uid is not None:
+            hit = await resolve(page, uid)
+            clip = {"x": hit.left, "y": hit.top, "width": hit.width, "height": hit.height}
+            # caret="initial" stops the driver writing an inline caret-color onto
+            # every field before capturing; the clip is viewport-relative, which is
+            # what the non-fullPage path expects.
+            png = await page.raw.screenshot(type="png", clip=clip, caret="initial")
         else:
             png = await page.screenshot(full_page=full_page)
         return _maybe_downscale(png, max_width)

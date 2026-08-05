@@ -55,6 +55,27 @@
   </form>
   <div id="form-output" class="output">Form not submitted</div>
 </div>
+
+<div class="section">
+  <h2>Event Trust</h2>
+  <label for="trust-input">Trust probe</label>
+  <input type="text" id="trust-input">
+  <div id="trust-output" class="output">[]</div>
+</div>
+
+<div class="section">
+  <h2>Opt In</h2>
+  <label for="opt-in">Newsletter</label>
+  <input type="checkbox" id="opt-in">
+  <div id="optin-output" class="output">unchecked</div>
+</div>
+
+<div class="section">
+  <h2>Start Date</h2>
+  <label for="date-input">Start date</label>
+  <input type="date" id="date-input">
+  <div id="date-events" class="output">[]</div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -74,6 +95,21 @@
   });
   document.getElementById('select-input').addEventListener('change', function() {
     document.getElementById('select-output').textContent = 'Selected: ' + this.value;
+  });
+  function recordTrust(inputId, outputId) {
+    var log = [];
+    var el = document.getElementById(inputId);
+    ['keydown', 'beforeinput', 'input', 'keyup'].forEach(function(type) {
+      el.addEventListener(type, function(e) {
+        log.push({ type: e.type, trusted: e.isTrusted, key: e.key || null });
+        document.getElementById(outputId).textContent = JSON.stringify(log);
+      });
+    });
+  }
+  recordTrust('trust-input', 'trust-output');
+  recordTrust('date-input', 'date-events');
+  document.getElementById('opt-in').addEventListener('change', function() {
+    document.getElementById('optin-output').textContent = this.checked ? 'checked' : 'unchecked';
   });
   document.getElementById('test-form').addEventListener('submit', function() {
     var name = document.getElementById('form-name').value;

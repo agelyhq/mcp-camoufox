@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Get Element Test{% endblock %}
+{% block content %}
+<h1>Get Element Test</h1>
+
+<div class="section">
+  <h2>Text</h2>
+  <p id="intro">Everything you need to know about this product.</p>
+  <p id="long">This paragraph exists to be longer than any sensible cap so the truncation
+  note can be observed: it repeats itself, then repeats itself again, and keeps going for
+  a while after that, well past two hundred characters of plain readable prose.</p>
+  <p id="styled" style="color: rgb(255, 0, 0)">Red on purpose</p>
+</div>
+
+<div class="section">
+  <h2>Fields</h2>
+  <label for="email">Email</label>
+  <input type="email" id="email" value="user@example.com">
+  <label for="blank">Nickname</label>
+  <input type="text" id="blank" value="">
+  <label for="notes">Notes</label>
+  <textarea id="notes">Deliver before noon</textarea>
+  <label for="pick">Fruit</label>
+  <select id="pick">
+    <option value="apple">Apple</option>
+    <option value="banana" selected>Banana</option>
+  </select>
+  <label for="agree">Terms</label>
+  <input type="checkbox" id="agree" checked disabled>
+</div>
+
+<div class="section">
+  <h2>Other elements</h2>
+  <div id="plain">Just a div, with no value at all</div>
+  <a id="link" href="/click" data-role="nav">Go to the click page</a>
+  <button id="locked" disabled>Locked</button>
+</div>
+
+<div class="section">
+  <h2>Repeated matches</h2>
+  <button class="buy">Buy A</button>
+  <button class="buy">Buy B</button>
+  <button class="buy">Buy C</button>
+</div>
+{% endblock %}

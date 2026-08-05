@@ -20,38 +20,28 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
         limit: int = _DEFAULT_LIMIT,
         include_preserved: bool = False,
     ) -> str:
-        """List console messages emitted by the active tab's page.
+        """List console messages from the active tab, in chronological order.
 
-        Messages are captured chronologically by the per-tab console monitor. Each
-        line shows the message id, level, source location and text. Useful for
-        diagnosing JavaScript errors, warnings and page logging.
+        Each line carries the message id, level, source location and text.
 
-        Params:
-        - profile: session/profile name (required). The session is created lazily.
-        - levels: optional filter by console level, e.g. ["error", "warning",
-          "log", "info", "debug"]. Case-insensitive.
-        - limit: max number of most-recent matching messages to return
-          (default 50).
-        - include_preserved: also include messages captured before the last
-          navigation (default False).
-
-        Returns a text listing, or "No console messages captured." when empty.
-
-        Errors: "Error: ProfileInUseError: ..." if the profile is locked;
-        "Error: RuntimeError: ..." if there is no active page.
+        Args:
+            levels: Filter, e.g. ["error", "warning", "log", "info", "debug"].
+                Case-insensitive.
+            limit: Most-recent matching messages returned.
+            include_preserved: Also include messages from before the last navigation.
         """
         session = await get_session(deps, profile)
         page = get_page(session)
-        entries = page.console.list_entries(
-            levels=levels,
-            limit=limit,
-            include_preserved=include_preserved,
-        )
+        matched, _ = page.console.list_entries(levels=levels, include_preserved=include_preserved)
+        # The tail, not a page: a console is read for what just happened, so the
+        # newest messages are the ones worth the tokens. The monitor pages like the
+        # network one; which end of the match to keep is this tool's own policy.
+        entries = matched[-limit:] if limit > 0 else matched
         if not entries:
             return "No console messages captured."
 
         lines = []
-        for e in entries:
-            loc = f" ({e.url}:{e.line_number})" if e.url else ""
-            lines.append(f"[{e.msgid}] {e.level.upper()}{loc}: {e.text}")
+        for entry in entries:
+            location = f" ({entry.url}:{entry.line_number})" if entry.url else ""
+            lines.append(f"[{entry.msgid}] {entry.level.upper()}{location}: {entry.text}")
         return f"Console messages ({len(entries)}):\n" + "\n".join(lines)

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Find Test{% endblock %}
+{% block content %}
+<!-- Deliberately flat: every element is a direct child of body, so a text lookup
+     returns the elements that carry the text and not the containers around them. -->
+<h1>Skills</h1>
+<h2>Home</h2>
+<button id="add-1">Add to cart</button>
+<button id="add-2" disabled>Add to cart</button>
+<a id="add-later" href="#later">Add to cart later</a>
+<label for="email">Email address</label>
+<input id="email" type="email" name="email">
+<input id="search" type="search" placeholder="Search products">
+<button id="checkout" data-testid="checkout-button">Go</button>
+<button id="submit">Submit</button>
+{% endblock %}

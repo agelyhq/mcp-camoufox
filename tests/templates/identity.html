@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Identity Test{% endblock %}
+{% block content %}
+<h1>Identity Test</h1>
+
+<div class="section">
+  <h2>Stable Target</h2>
+  <div id="rows">
+    <button id="target-btn" onclick="document.getElementById('click-output').textContent = 'target clicked'">Target row</button>
+  </div>
+  <button id="other-btn" onclick="document.getElementById('click-output').textContent = 'other clicked'">Other row</button>
+  <div id="click-output" class="output">nothing clicked</div>
+</div>
+{% endblock %}

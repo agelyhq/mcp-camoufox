@@ -89,29 +89,19 @@ def console_page():
     return render_template("console.html")
 
 
+@app.route("/subframe")
+def subframe_page():
+    return render_template("subframe.html")
+
+
 @app.route("/infinite-scroll")
 def infinite_scroll_page():
     return render_template("infinite_scroll.html")
 
 
-@app.route("/hover")
-def hover_page():
-    return render_template("hover.html")
-
-
-@app.route("/drag")
-def drag_page():
-    return render_template("drag.html")
-
-
 @app.route("/fill-form")
 def fill_form_page():
     return render_template("fill_form.html")
-
-
-@app.route("/type-text")
-def type_text_page():
-    return render_template("type_text.html")
 
 
 @app.route("/click-at")
@@ -122,6 +112,66 @@ def click_at_page():
 @app.route("/get-html")
 def get_html_page():
     return render_template("get_html.html")
+
+
+@app.route("/probe")
+def probe_page():
+    return render_template("probe.html")
+
+
+@app.route("/overlay")
+def overlay_page():
+    return render_template("overlay.html")
+
+
+@app.route("/waiting")
+def waiting_page():
+    return render_template("waiting.html")
+
+
+@app.route("/identity")
+def identity_page():
+    return render_template("identity.html")
+
+
+@app.route("/selector-branches")
+def selector_branches_page():
+    return render_template("selector_branches.html")
+
+
+@app.route("/selector-large")
+def selector_large_page():
+    return render_template("selector_large.html")
+
+
+@app.route("/snapshot-cards")
+def snapshot_cards_page():
+    return render_template("snapshot_cards.html")
+
+
+@app.route("/snapshot-names")
+def snapshot_names_page():
+    return render_template("snapshot_names.html")
+
+
+@app.route("/find")
+def find_page():
+    return render_template("find_page.html")
+
+
+@app.route("/get-element")
+def get_element_page():
+    return render_template("get_element_page.html")
+
+
+@app.route("/names-labels")
+def names_labels_page():
+    return render_template("names_labels.html")
+
+
+@app.route("/names-containers")
+def names_containers_page():
+    return render_template("names_containers.html")
 
 
 # ---------------------------------------------------------------------------

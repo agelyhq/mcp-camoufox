@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Sub-frame Test</title></head>
+<body>
+  <h1>Sub-frame Test Page</h1>
+  <p id="status">waiting</p>
+
+  <!-- An embed that navigates on its own after the page has finished loading, the
+       way an ad slot, a captcha or a video player does. The tab's own document is
+       untouched by it, so nothing the monitors captured may be rotated out. -->
+  <iframe id="embed" src="/api/data" width="200" height="80"></iframe>
+
+  <script>
+    window.addEventListener('load', () => {
+      console.log('parent loaded');
+      fetch('/api/data').then(() => {
+        setTimeout(() => {
+          document.getElementById('embed').src = '/api/data?round=2';
+          document.getElementById('status').textContent = 'subframe navigated';
+        }, 300);
+      });
+    });
+  </script>
+</body>
+</html>

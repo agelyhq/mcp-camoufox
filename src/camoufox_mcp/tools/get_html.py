@@ -4,6 +4,7 @@ import json
 from typing import TYPE_CHECKING
 
 from camoufox_mcp.tools._base import get_page, get_session, tool
+from camoufox_mcp.tools._errors import validate_choice
 from camoufox_mcp.tools._text import truncate_chars
 
 if TYPE_CHECKING:
@@ -56,39 +57,18 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
     ) -> str:
         """Read markup or visible text from the active tab, scoped and capped.
 
-        Reflects the live, post-JavaScript DOM (not the original network response).
-        Prefer ``mode="text"`` with a ``selector`` as the cheap way to read page
-        content: it returns just the rendered text of one region instead of a whole
-        document of markup.
+        Reflects the live post-JavaScript DOM, not the network response.
+        ``mode="text"`` with a ``selector`` is the cheap way to read page content.
 
-        Params:
-            profile: The browser profile whose active tab is read.
-            selector: CSS selector scoping the output to the FIRST matching element.
-                When ``None`` (default) the whole document is used. A selector that
-                matches nothing raises a ValueError.
-            max_chars: Cap on the returned string length (default 20000). When the
-                content is longer, it is cut to ``max_chars`` and a
-                ``"\\n[truncated N chars]"`` note (N = characters removed) is
-                appended. ``max_chars <= 0`` means unlimited.
-            strip_scripts: html mode only. When true (default), ``<script>`` elements
-                are removed before serializing. The removal happens on a clone, so the
-                live page is never mutated.
-            mode: ``"html"`` (default) returns the scope's ``outerHTML``; ``"text"``
-                returns the scope's ``innerText`` (rendered visible text).
-
-        Returns:
-            The requested HTML or text, capped per ``max_chars``.
-
-        Errors (returned as an "Error:"/"Timeout:" string, never raised):
-            - "Error: ValueError: no element matches selector '<sel>'" if a selector
-              matched nothing.
-            - "Error: ValueError: invalid mode '<mode>'; ..." for an unknown mode.
-            - "Error: ProfileInUseError: ..." if the profile lock is held.
+        Args:
+            selector: Scopes the output to the FIRST match; the whole document when
+                omitted.
+            max_chars: Cap on the returned string (``<= 0`` unlimited).
+            strip_scripts: html mode only: drop ``<script>`` elements. Done on a
+                clone, so the live page is never mutated.
+            mode: "html" for the scope's outerHTML, "text" for its innerText.
         """
-        if mode not in _VALID_MODES:
-            raise ValueError(
-                f"invalid mode '{mode}'; valid values: {', '.join(map(repr, _VALID_MODES))}"
-            )
+        validate_choice("mode", mode, _VALID_MODES)
         session = await get_session(deps, profile)
         page = get_page(session)
         result = await page.evaluate(_build_extract_js(selector, mode, strip_scripts))

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Selector Branches Test{% endblock %}
+{% block content %}
+<h1>Selector Branches Test</h1>
+<p>Every element ends its own text with a unique marker, so a match set can be named
+exactly. The selector shapes exercised here are the real ones from the usage record:
+several comma branches, each carrying its own <code>:has-text()</code>.</p>
+
+<div class="section" id="lobby">
+  <h2>Lobby</h2>
+  <button class="go metal-plate ready-btn" data-m="b1" onclick="mark('b1')">Prêt b1</button>
+  <button class="go" data-m="b2" onclick="mark('b2')">Prêt b2</button>
+  <button class="go" data-m="b3" disabled>Prêt b3</button>
+  <button class="go" data-m="b4" onclick="mark('b4')">Attendre b4</button>
+  <div class="alpha" data-m="a1">alpha a1</div>
+  <div class="alpha" data-m="a2">alpha a2</div>
+  <div role="option" data-m="o1">Slow march o1</div>
+  <div role="option" data-m="o2">Quick fight o2</div>
+</div>
+
+<div class="section leave-modal" id="modal">
+  <h2>Leave modal</h2>
+  <button data-m="q1">Quitter q1</button>
+  <button data-m="q2">Rester q2</button>
+</div>
+
+<div class="section roster" id="roster">
+  <h2>Roster</h2>
+  <button data-m="r1">Ajouter r1</button>
+  <button data-m="r2">RENOMMER r2</button>
+</div>
+
+<div class="section" id="loose">
+  <h2>Loose controls</h2>
+  <button data-m="r3">RENOMMER r3</button>
+  <div class="btn-rename" data-m="r4">rename box r4</div>
+  <button data-m="s1">a &gt;&gt; b s1</button>
+  <div role="option" data-m="s2">Show :visible rows s2</div>
+  <div data-tag="a,b" data-m="c1">comma attr c1</div>
+  <button data-m="c2">Yes, now c2</button>
+</div>
+
+<div id="branch-output" class="output">nothing yet</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  function mark(marker) {
+    document.getElementById('branch-output').textContent = marker + ' clicked';
+  }
+</script>
+{% endblock %}

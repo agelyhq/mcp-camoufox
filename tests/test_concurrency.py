@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import TYPE_CHECKING
 
-from tests.helpers import evaluate, tool_text
+from tests.helpers import evaluate, extract_uid, tool_text
 
 if TYPE_CHECKING:
     from fastmcp import Client
@@ -72,5 +73,28 @@ async def test_parallel_first_calls_same_profile_share_one_session(
     listing = tool_text(await client.call_tool("list_sessions", {}))
     assert listing.count(f"Session '{PROFILE_SHARED}'") == 1
 
+    # The surviving session must still serve the page that landed, not merely answer
+    # without an error prefix.
     title = await evaluate(client, PROFILE_SHARED, "document.title")
-    assert not title.startswith(("Error:", "Timeout:")), title
+    assert json.loads(title) == "MCP Tool Test Pages", title
+
+
+async def test_parallel_uid_actions_on_one_tab(client: Client, flask_server: str) -> None:
+    """Pins the lock around the element store.
+
+    Without it two coroutines each build a store for the same tab, and the loser's
+    uids silently stop resolving.
+    """
+    await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": PROFILE_SHARED})
+    snap = tool_text(await client.call_tool("snapshot", {"profile": PROFILE_SHARED}))
+    uid = extract_uid(snap, "Count clicks")
+
+    results = await asyncio.gather(
+        client.call_tool("snapshot", {"profile": PROFILE_SHARED}),
+        client.call_tool("click", {"profile": PROFILE_SHARED, "uid": uid}),
+        client.call_tool("find", {"profile": PROFILE_SHARED, "role": "button"}),
+    )
+    texts = [tool_text(r) for r in results]
+
+    assert all("stale uid" not in t for t in texts), texts
+    assert texts[1].startswith("Clicked <button>"), texts[1]
