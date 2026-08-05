@@ -13,20 +13,10 @@ if TYPE_CHECKING:
 def register(mcp: FastMCP, deps: ToolDeps) -> None:
     @tool(mcp, deps)
     async def close_page(profile: str, page_idx: int) -> str:
-        """Close a tab of the profile's session by its index.
-
-        Closing the active tab promotes another open tab to active (if any remain).
-        Use `list_pages` to discover valid indices.
+        """Close a tab. Closing the active one promotes another still-open tab.
 
         Args:
-            profile: An already-active session identifier.
-            page_idx: Stable index of the tab to close (from `list_pages`).
-
-        Returns:
-            "Closed tab [<page_idx>] (<remaining> remaining)".
-
-        Errors:
-            Returns "Error: ValueError: ..." if no tab has the given index.
+            page_idx: Stable tab index, from ``list_pages``.
         """
         session = await get_session(deps, profile)
         await session.close_page(page_idx)

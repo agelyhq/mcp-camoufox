@@ -1,6 +1,6 @@
 [project]
-name = "camoufox-mcp"
-version = "0.2.0"
+name = "mcp-camoufox"
+version = "0.3.0"
 description = "Browser automation MCP server that does not get blocked, backed by Camoufox anti-detect Firefox"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -8,17 +8,39 @@ license = "LicenseRef-FSL-1.1-MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Fabien Vauchelles" }]
 keywords = ["mcp", "browser-automation", "camoufox", "firefox", "anti-detect", "claude-code"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+    "Topic :: Software Development :: Testing",
+]
 dependencies = [
     "fastmcp>=3.4.4",
-    # camoufox and playwright are bounded together: an unbounded (transitive)
-    # playwright once drifted ahead of the installed Camoufox binary's Juggler
-    # protocol schema and every launch failed with a Browser.setDefaultViewport
-    # protocol error (2026-07-15 incident, see docs/decisions.md).
-    "camoufox[geoip]>=0.4.11,<0.5",
-    "playwright>=1.58,<1.59",
+    # camoufox and playwright are bounded together because the Camoufox pin does NOT
+    # bound the browser: the launcher resolves the newest GitHub browser release whose
+    # release ordinal matches, not a Firefox version, so the binary drifts forward on
+    # its own (this machine moved from Firefox 135 to 152.0.4-beta.28 on 2026-07-19
+    # under an unchanged `<0.5` pin). Playwright must therefore be held to what the
+    # binary's Juggler schema actually implements: 1.61 added `viewport.isMobile` to
+    # Browser.setDefaultViewport, which the bundled schema rejects, and every launch
+    # failed with a protocol error (2026-07-15 incident, see docs/decisions.md).
+    # camoufox 0.5.4 declares `playwright<1.61` itself; stating it here keeps the bound
+    # visible and adds the 1.60 floor. CAMOUFOX_BROWSER_VERSION pins the browser build.
+    "camoufox[geoip]>=0.5.4,<0.6",
+    "playwright>=1.60,<1.61",
     "platformdirs>=4.0",
     "filelock>=3.13",
     "pillow>=10.0",
+    # Imported directly by tools/_observe.py for schema metadata. It arrives through
+    # fastmcp anyway, but relying on a transitive dependency is how the Playwright
+    # drift of 2026-07-15 happened, so it is declared.
+    "pydantic>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -36,8 +58,8 @@ Documentation = "https://github.com/agelyhq/mcp-camoufox/tree/main/docs"
 Issues = "https://github.com/agelyhq/mcp-camoufox/issues"
 
 [project.scripts]
-camoufox-mcp = "camoufox_mcp.server:main"
-camoufox-mcp-daemon = "camoufox_mcp.daemon.main:main"
+mcp-camoufox = "camoufox_mcp.server:main"
+mcp-camoufox-daemon = "camoufox_mcp.daemon.main:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Names: repeated blocks{% endblock %}
+{% block content %}
+<h1>Addresses</h1>
+
+<!-- Three equivalent markup shapes around the same repeated control. Whatever the
+     container tag is, the snapshot has to say WHICH block each Edit button edits. -->
+<section id="home-block">
+  <h2>Home address</h2>
+  <p>12 Rue de la Paix</p>
+  <button class="edit">Edit</button>
+</section>
+
+<article id="work-block">
+  <h2>Work address</h2>
+  <p>5 Avenue Foch</p>
+  <button class="edit">Edit</button>
+</article>
+
+<div id="billing-block">
+  <h2>Billing address</h2>
+  <p>9 Quai Branly</p>
+  <button class="edit">Edit</button>
+</div>
+{% endblock %}

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from camoufox_mcp.dom import resolve_uid_or_raise, scroll_into_view
+from camoufox_mcp.dom import scroll_uid
 from camoufox_mcp.tools._base import get_page, get_session, tool
+from camoufox_mcp.tools._errors import validate_choice
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -26,34 +27,17 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
         amount: int | None = None,
         uid: str | None = None,
     ) -> str:
-        """Scroll the page, or bring a specific element into view.
+        """Scroll the viewport, or bring 1 element into view.
 
-        Two modes:
-        - When ``uid`` is given, that element is scrolled into view (``direction`` and
-          ``amount`` are ignored).
-        - Otherwise the viewport is scrolled by ``amount`` pixels in ``direction``.
-
-        Parameters:
-        - profile: session/profile name.
-        - direction: one of ``down``, ``up``, ``left``, ``right`` (default ``down``).
-        - amount: pixels to scroll; defaults to one viewport length when omitted.
-        - uid: optional element uid to scroll into view instead of a fixed distance.
-
-        Returns a confirmation of what was scrolled.
-
-        Errors:
-        - ``Error: ValueError: invalid direction '<d>'; use down/up/left/right``.
-        - ``Error: ValueError: unknown or stale uid '<uid>'; take a new snapshot`` when
-          a given uid is invalid or stale.
+        Args:
+            direction: down, up, left or right. Ignored when ``uid`` is given.
+            amount: Pixels; 1 viewport length when omitted. Ignored with ``uid``.
         """
         session = await get_session(deps, profile)
         page = get_page(session)
         if uid is not None:
-            info = await resolve_uid_or_raise(page, uid)
-            await scroll_into_view(page, uid)
-            return f"Scrolled <{info.get('tag', '?')}> into view"
-        if direction not in _DELTAS:
-            raise ValueError(f"invalid direction '{direction}'; use {'/'.join(_DELTAS)}")
+            return f"Scrolled <{await scroll_uid(page, uid)}> into view"
+        validate_choice("direction", direction, tuple(_DELTAS))
         dx_sign, dy_sign = _DELTAS[direction]
         if amount is None:
             axis = "innerWidth" if dx_sign else "innerHeight"

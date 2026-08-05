@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Names: labels and icons{% endblock %}
+{% block content %}
+<h1>Names from labels and icons</h1>
+
+<!-- A <label> WRAPPING its control. The control's contents are data: an option list
+     and whatever the user typed must never be folded into the name. -->
+<label id="fruit-label">Pick fruit
+  <select id="fruit" name="fruit">
+    <option value="a">Apple</option>
+    <option value="b">Berry</option>
+  </select>
+</label>
+
+<label id="notes-label">Notes
+  <textarea id="notes" name="notes">SECRETDATA</textarea>
+</label>
+
+<!-- aria-labelledby targets that carry data of their own, which the referenced text
+     must walk around exactly as a wrapping label does. -->
+<span id="region-ref">Region
+  <select id="region-picker" name="region">
+    <option value="e">East</option>
+    <option value="w">West</option>
+  </select>
+</span>
+<input type="text" id="region-field" name="region_code" aria-labelledby="region-ref">
+
+<div id="summary-ref">Summary
+  <table><tbody><tr><td>CellOne</td><td>CellTwo</td></tr></tbody></table>
+</div>
+<input type="text" id="summary-field" name="summary_code" aria-labelledby="summary-ref">
+
+<!-- Icon controls: the only text they own is an image text alternative. -->
+<a id="home-link" href="/home"><img
+  src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+  alt="Home page" width="24" height="24"></a>
+<button id="delete-row"><img
+  src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+  alt="Delete row" width="24" height="24"></button>
+{% endblock %}

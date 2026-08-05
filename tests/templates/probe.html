@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Probe Test{% endblock %}
+{% block content %}
+<h1>Probe Test</h1>
+<p>Deliberately inert: no script on this page ever touches the DOM, so every
+mutation an observer records comes from the automation under test.</p>
+
+<div class="section">
+  <h2>Button</h2>
+  <button id="probe-btn">Probe button</button>
+</div>
+
+<div class="section">
+  <h2>Fields</h2>
+  <label for="probe-text">Full name</label>
+  <input type="text" id="probe-text" name="fullname">
+
+  <label for="probe-email">Email address</label>
+  <input type="email" id="probe-email" name="mail">
+
+  <label for="probe-select">Fruit choice</label>
+  <select id="probe-select" name="fruit">
+    <option value="apple">Apple</option>
+    <option value="banana">Banana</option>
+    <option value="cherry">Cherry</option>
+  </select>
+
+  <label for="probe-file">Attachment</label>
+  <input type="file" id="probe-file" name="attachment">
+
+  <label><input type="checkbox" id="probe-check"> Accept terms</label>
+</div>
+
+<div class="section">
+  <h2>Filler</h2>
+  <p id="probe-tail">A tall block so scrolling to an element is a real scroll.</p>
+  <div style="height:1200px"></div>
+  <button id="probe-deep">Deep button</button>
+</div>
+{% endblock %}

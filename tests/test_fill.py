@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from tests.helpers import PROFILE, evaluate, extract_uid, goto_and_find, text_content, tool_text
 
 if TYPE_CHECKING:
     from fastmcp import Client
+
+
+def _event_log(rendered: str) -> list[dict]:
+    """Unwrap the JSON the page wrote into an output node, then the node's own JSON."""
+    return json.loads(json.loads(rendered))
 
 
 async def test_fill_text_input(client: Client, flask_server: str) -> None:
@@ -153,9 +159,20 @@ async def test_fill_observe_snapshot_yields_usable_uids(client: Client, flask_se
     assert "filled" in result.lower()
     assert "--- observation (snapshot) ---" in result
 
-    # The fresh observation exposes usable uids for the rest of the form.
+    # The fresh observation exposes usable uids for the rest of the form. `extract_uid`
+    # already guarantees the "eN" shape, so asserting that shape proves nothing: the
+    # only thing worth checking is that the uid still resolves and drives a real fill.
     email_uid = extract_uid(result, "email")
-    assert email_uid.startswith("e")
+    followup = tool_text(
+        await client.call_tool(
+            "fill", {"profile": PROFILE, "uid": email_uid, "value": "obs@example.com"}
+        )
+    )
+    assert followup == "Filled <input> with 15 chars", followup
+    assert (
+        json.loads(await text_content(client, PROFILE, "email-output"))
+        == "Email value: obs@example.com"
+    )
 
 
 async def test_fill_invalid_observe_rejected(client: Client, flask_server: str) -> None:
@@ -167,3 +184,68 @@ async def test_fill_invalid_observe_rejected(client: Client, flask_server: str) 
     )
     assert "error" in result.lower()
     assert "invalid observe" in result.lower()
+
+
+async def test_fill_produces_trusted_key_events(client: Client, flask_server: str) -> None:
+    """Guards against a future simplification to `el.value = v`.
+
+    Every key event the field sees must be browser-generated. A script-dispatched
+    input event is the single most common automation tell.
+    """
+    uid = await goto_and_find(client, f"{flask_server}/fill", PROFILE, "Trust probe")
+
+    await client.call_tool("fill", {"profile": PROFILE, "uid": uid, "value": "ok"})
+
+    log = _event_log(await text_content(client, PROFILE, "trust-output"))
+    assert log, "the field recorded no key events at all"
+    assert all(entry["trusted"] for entry in log), log
+    assert {"keydown", "beforeinput", "input", "keyup"} <= {entry["type"] for entry in log}
+
+
+async def test_fill_clear_uses_a_real_delete(client: Client, flask_server: str) -> None:
+    """Clearing is a real selection plus a real Delete, not an assignment."""
+    uid = await goto_and_find(client, f"{flask_server}/fill", PROFILE, "Trust probe")
+    await client.call_tool("fill", {"profile": PROFILE, "uid": uid, "value": "first"})
+    await evaluate(client, PROFILE, "document.getElementById('trust-output').textContent = '[]'")
+
+    await client.call_tool(
+        "fill", {"profile": PROFILE, "uid": uid, "value": "second", "clear_first": True}
+    )
+
+    log = _event_log(await text_content(client, PROFILE, "trust-output"))
+    assert any(e["type"] == "keydown" and e["key"] == "Delete" for e in log), log
+    assert all(e["trusted"] for e in log), log
+    value = await evaluate(client, PROFILE, "document.getElementById('trust-input').value")
+    assert value == '"second"', value
+
+
+async def test_fill_date_input_still_types(client: Client, flask_server: str) -> None:
+    """A date field is typed into, not assigned: this browser accepts real keystrokes."""
+    uid = await goto_and_find(client, f"{flask_server}/fill", PROFILE, "Start date")
+
+    await client.call_tool("fill", {"profile": PROFILE, "uid": uid, "value": "08042026"})
+
+    log = _event_log(await text_content(client, PROFILE, "date-events"))
+    assert any(e["type"] == "keydown" and e["trusted"] for e in log), log
+
+
+async def test_fill_checkbox_toggles(client: Client, flask_server: str) -> None:
+    """`fill` on a checkbox sets the state asked for instead of typing into it."""
+    uid = await goto_and_find(client, f"{flask_server}/fill", PROFILE, "Newsletter")
+
+    result = tool_text(
+        await client.call_tool("fill", {"profile": PROFILE, "uid": uid, "value": "true"})
+    )
+    assert result == "Checked <input>"
+    assert json.loads(await text_content(client, PROFILE, "optin-output")) == "checked"
+
+    again = tool_text(
+        await client.call_tool("fill", {"profile": PROFILE, "uid": uid, "value": "true"})
+    )
+    assert again == "<input> is already checked"
+
+    off = tool_text(
+        await client.call_tool("fill", {"profile": PROFILE, "uid": uid, "value": "false"})
+    )
+    assert off == "Unchecked <input>"
+    assert json.loads(await text_content(client, PROFILE, "optin-output")) == "unchecked"

@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Snapshot Names{% endblock %}
+{% block extra_css %}
+    /* The usual way a styled checkbox is built: the real input is hidden and the
+       label carries the whole visual. */
+    #agree-box, #ship-fast { display: none; }
+    .switch { cursor: pointer; display: inline-block; padding: 6px 12px;
+      border: 1px solid #888; border-radius: 4px; }
+    /* Same construction, no pointer cursor at all: nothing but the hidden control
+       makes this label a target. */
+    .plain { display: inline-block; padding: 6px 12px; border: 1px dashed #888; }
+    .panel { border: 1px solid #ddd; padding: 10px; margin: 10px 0; }
+{% endblock %}
+{% block content %}
+<h1>Snapshot Names</h1>
+
+<div class="section">
+  <h2>Styled checkbox</h2>
+  <label id="agree" class="switch">
+    <input type="checkbox" id="agree-box" name="agree"
+           onchange="document.getElementById('agree-output').textContent = this.checked ? 'on' : 'off'">
+    <span>Agree to terms</span>
+  </label>
+  <div id="agree-output" class="output">off</div>
+
+  <label id="ship" class="plain">
+    <input type="radio" id="ship-fast" name="shipping" value="fast" checked>
+    <span>Fast shipping</span>
+  </label>
+</div>
+
+<div class="section">
+  <h2>Unlabelled select</h2>
+  <!-- No label, no aria-label: the only text it owns is its own option list, which
+       is data and must never become its name. -->
+  <select id="bare-select" name="fruit">
+    <option value="a">Apple</option>
+    <option value="b">Berry</option>
+  </select>
+</div>
+
+<div class="section">
+  <h2>Nested button text</h2>
+  <button id="send-btn"><span>Send</span></button>
+</div>
+
+<div class="section">
+  <h2>Nested panel</h2>
+  <div class="panel" role="group">
+    <h3>Panel heading</h3>
+    <p>Panel body sentence</p>
+    <button id="panel-btn">Panel action</button>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Data table</h2>
+  <table>
+    <thead><tr><th>Alpha column</th><th>Beta column</th></tr></thead>
+    <tbody><tr><td>Alpha value</td><td>Beta value</td></tr></tbody>
+  </table>
+</div>
+
+<div class="section">
+  <h2>Datalist</h2>
+  <input id="colour-input" name="colour" list="colours" placeholder="Colour">
+  <datalist id="colours">
+    <option value="Reddish"></option>
+    <option value="Greenish"></option>
+  </datalist>
+</div>
+{% endblock %}

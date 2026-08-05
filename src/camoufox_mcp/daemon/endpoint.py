@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import os
 import secrets
@@ -14,10 +15,20 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from starlette.middleware import Middleware
 
+from camoufox_mcp.daemon import paths
 from camoufox_mcp.daemon.auth import TokenAuthMiddleware
+from camoufox_mcp.daemon.socket_path import (
+    check_socket_path,
+    daemon_socket_path,
+    ensure_socket_dir,
+    publish_socket_path,
+    published_socket_path,
+    unpublish_socket_path,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from camoufox_mcp.config import ServerConfig
 
@@ -70,12 +81,44 @@ class DaemonEndpoint(ABC):
         """Reserve the listen address (and, on Windows, a token) before uvicorn starts."""
 
     @abstractmethod
-    async def harden_when_ready(self, config: ServerConfig) -> None:
-        """Restrict the freshly bound control channel to its owner."""
+    async def harden_when_ready(self, config: ServerConfig) -> str | None:
+        """Restrict the freshly bound control channel to its owner.
+
+        Returns the :meth:`advert_id` of the channel once it is hardened, which is
+        the daemon's proof of ownership when it withdraws the advert on exit.
+        """
 
     @abstractmethod
-    def cleanup(self, config: ServerConfig) -> None:
-        """Remove any on-disk address advert left by this daemon."""
+    def _cleanup(self, config: ServerConfig) -> None:
+        """Unlink the on-disk address advert unconditionally.
+
+        Private on purpose: every caller goes through :meth:`cleanup_if_owned`, so
+        no code path can remove an advert without first proving whose it is.
+        """
+
+    @abstractmethod
+    def advert_id(self, config: ServerConfig) -> str | None:
+        """Identity of the advert published right now, or ``None`` when there is none.
+
+        It changes as soon as a different daemon publishes at the same address, so a
+        caller can tell the advert it inspected from one written since.
+        """
+
+    def cleanup_if_owned(self, config: ServerConfig, advert_id: str) -> bool:
+        """Remove the advert unless it now belongs to a different daemon.
+
+        Unlinking whatever happens to be published is how a live daemon loses its only
+        control channel: its browsers keep running, unreachable. So the advert goes
+        only when it is still the one identified by ``advert_id``, or already gone (a
+        daemon whose socket the server removed on its way out still has a pointer to
+        withdraw). Callers pair this with a health probe, so a published advert is
+        dropped only when it is both unanswered and theirs.
+        """
+        current = self.advert_id(config)
+        if current is not None and current != advert_id:
+            return False
+        self._cleanup(config)
+        return True
 
     @abstractmethod
     def _sync_transport(self, conn: Conn) -> httpx.BaseTransport: ...
@@ -97,29 +140,52 @@ class DaemonEndpoint(ABC):
 
 
 class UnixSocketEndpoint(DaemonEndpoint):
-    """POSIX control channel: a 0o600 Unix domain socket under the 0o700 daemon dir."""
+    """POSIX control channel: a 0o600 Unix domain socket in a 0o700 directory.
+
+    The socket lives under ``XDG_RUNTIME_DIR`` when there is one, because
+    ``sun_path`` is far too short to hold an arbitrary data dir. Binding therefore
+    uses the address derived here and now, while resolving follows the pointer the
+    running daemon left in the data dir (see :mod:`camoufox_mcp.daemon.socket_path`).
+    """
 
     def resolve(self, config: ServerConfig) -> Conn | None:
-        if not config.daemon_socket_path.exists():
+        path = published_socket_path(config)
+        if not path.exists():
             return None
-        return Conn(base_url=_UDS_HOST, socket_path=str(config.daemon_socket_path))
+        return Conn(base_url=_UDS_HOST, socket_path=str(path))
 
     def bind(self, config: ServerConfig) -> Bound:
-        return Bound(run_kwargs={"uvicorn_config": {"uds": str(config.daemon_socket_path)}})
+        path = daemon_socket_path(config)
+        check_socket_path(path)
+        ensure_socket_dir(config)
+        publish_socket_path(config, path)
+        return Bound(run_kwargs={"uvicorn_config": {"uds": str(path)}})
 
-    async def harden_when_ready(self, config: ServerConfig) -> None:
+    async def harden_when_ready(self, config: ServerConfig) -> str | None:
         # uvicorn chmods a freshly created Unix socket to 0o666; that would let any
         # local user reach /shutdown and the full browser-driving MCP surface.
+        path = daemon_socket_path(config)
         deadline = time.monotonic() + _HARDEN_DEADLINE_S
         while time.monotonic() < deadline:
-            if config.daemon_socket_path.exists():
-                config.daemon_socket_path.chmod(0o600)
-                return
+            if path.exists():
+                path.chmod(0o600)
+                return self.advert_id(config)
             await asyncio.sleep(_HARDEN_POLL_S)
+        return None
 
-    def cleanup(self, config: ServerConfig) -> None:
+    def _cleanup(self, config: ServerConfig) -> None:
         with contextlib.suppress(OSError):
-            config.daemon_socket_path.unlink()
+            published_socket_path(config).unlink()
+        unpublish_socket_path(config)
+
+    def advert_id(self, config: ServerConfig) -> str | None:
+        # A rebind unlinks and recreates the socket, so the inode identifies the
+        # daemon that published it even while the file name stays the same.
+        try:
+            stat = published_socket_path(config).stat()
+        except OSError:
+            return None
+        return f"{stat.st_dev}:{stat.st_ino}"
 
     def _sync_transport(self, conn: Conn) -> httpx.BaseTransport:
         return httpx.HTTPTransport(uds=conn.socket_path)
@@ -145,7 +211,7 @@ class LoopbackEndpoint(DaemonEndpoint):
     """
 
     def resolve(self, config: ServerConfig) -> Conn | None:
-        data = _read_endpoint_file(config.daemon_endpoint_path)
+        data = _read_endpoint_file(paths.endpoint_path(config))
         if data is None:
             return None
         return Conn(base_url=f"http://{data['host']}:{data['port']}", token=data["token"])
@@ -156,7 +222,7 @@ class LoopbackEndpoint(DaemonEndpoint):
         port = sock.getsockname()[1]
         token = secrets.token_urlsafe(32)
         _write_endpoint_file(
-            config.daemon_endpoint_path, {"host": "127.0.0.1", "port": port, "token": token}
+            paths.endpoint_path(config), {"host": "127.0.0.1", "port": port, "token": token}
         )
         return Bound(
             run_kwargs={"sockets": [sock]},
@@ -165,13 +231,22 @@ class LoopbackEndpoint(DaemonEndpoint):
             _socket=sock,
         )
 
-    async def harden_when_ready(self, config: ServerConfig) -> None:
+    async def harden_when_ready(self, config: ServerConfig) -> str | None:
         # The endpoint file is written 0o600 at bind(); nothing else to restrict.
-        return
+        return self.advert_id(config)
 
-    def cleanup(self, config: ServerConfig) -> None:
+    def _cleanup(self, config: ServerConfig) -> None:
         with contextlib.suppress(OSError):
-            config.daemon_endpoint_path.unlink()
+            paths.endpoint_path(config).unlink()
+
+    def advert_id(self, config: ServerConfig) -> str | None:
+        # Port plus a digest of the token: unique per daemon (the token is fresh on
+        # every bind) without ever putting the secret itself in a log line.
+        data = _read_endpoint_file(paths.endpoint_path(config))
+        if data is None:
+            return None
+        digest = hashlib.sha256(str(data["token"]).encode("utf-8")).hexdigest()[:16]
+        return f"{data['port']}:{digest}"
 
     def _sync_transport(self, conn: Conn) -> httpx.BaseTransport:
         return httpx.HTTPTransport()
@@ -187,7 +262,7 @@ class LoopbackEndpoint(DaemonEndpoint):
         return factory
 
 
-def _read_endpoint_file(path: Any) -> dict[str, Any] | None:
+def _read_endpoint_file(path: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -197,7 +272,7 @@ def _read_endpoint_file(path: Any) -> dict[str, Any] | None:
     return data
 
 
-def _write_endpoint_file(path: Any, data: dict[str, Any]) -> None:
+def _write_endpoint_file(path: Path, data: dict[str, Any]) -> None:
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data), encoding="utf-8")
     with contextlib.suppress(OSError):
@@ -205,4 +280,11 @@ def _write_endpoint_file(path: Any, data: dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
-ENDPOINT: DaemonEndpoint = LoopbackEndpoint() if IS_WINDOWS else UnixSocketEndpoint()
+def select_endpoint() -> DaemonEndpoint:
+    """The control-channel strategy this platform serves on.
+
+    A factory rather than a module singleton: the daemon and the proxy each build one
+    at their composition root and hand it to everything below them, so substituting a
+    strategy is an argument rather than a monkeypatch.
+    """
+    return LoopbackEndpoint() if IS_WINDOWS else UnixSocketEndpoint()

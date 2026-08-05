@@ -1,0 +1,81 @@
+name: Release
+
+# Publishes to PyPI when a version tag is pushed.
+#
+# Authentication is GitHub OIDC trusted publishing, so there is no API token
+# anywhere: PyPI verifies the workflow identity directly. The publisher is
+# configured once at https://pypi.org/manage/account/publishing/ with this
+# repository, this workflow filename, and the "pypi" environment.
+#
+# The environment gate means a release waits for a manual approval in the
+# GitHub UI before the upload runs, which is the last chance to stop a bad tag.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the wheel and the sdist
+        run: uv build
+
+      # PEP 639 metadata is easy to get wrong and impossible to fix after an
+      # upload, since a version number can never be reused. Fail here instead.
+      - name: Check the metadata
+        run: |
+          uvx twine check --strict dist/*
+          python - <<'PY'
+          import pathlib, zipfile, sys
+          wheel = next(pathlib.Path("dist").glob("*.whl"))
+          with zipfile.ZipFile(wheel) as zf:
+              name = next(n for n in zf.namelist() if n.endswith(".dist-info/METADATA"))
+              meta = zf.read(name).decode()
+          print(meta.split("\n\n", 1)[0])
+          checks = {
+              "Metadata-Version: 2.4": "PEP 639 needs metadata 2.4",
+              "Name: mcp-camoufox": "distribution name must be mcp-camoufox",
+              "License-Expression: LicenseRef-FSL-1.1-MIT": "the licence must stay FSL-1.1-MIT",
+          }
+          missing = [why for line, why in checks.items() if line not in meta]
+          # License and License-Expression are mutually exclusive: PyPI rejects the pair.
+          if "\nLicense: " in meta:
+              missing.append("a legacy License field is present alongside License-Expression")
+          if missing:
+              sys.exit("metadata check failed: " + "; ".join(missing))
+          print("metadata OK")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

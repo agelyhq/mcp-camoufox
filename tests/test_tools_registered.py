@@ -15,7 +15,6 @@ EXPECTED_TOOLS = {
     "navigate",
     "reload",
     "go_back",
-    "go_forward",
     "wait_for",
     # tabs
     "list_pages",
@@ -26,35 +25,52 @@ EXPECTED_TOOLS = {
     "snapshot",
     "screenshot",
     "get_html",
+    "find",
+    "get_element",
     # interaction
     "click",
     "click_at",
-    "hover",
-    "drag",
     "fill",
     "fill_form",
-    "type_text",
     "press_key",
     "scroll",
     "upload_file",
     "handle_dialog",
     # scripting
     "evaluate",
-    # network / console / performance
+    # network / console
     "list_network_requests",
     "get_network_request",
     "list_console_messages",
-    "performance_summary",
 }
 
-# Names from the pre-rebuild server that must no longer be registered.
-LEGACY_TOOLS = {"kill_session", "take_snapshot", "take_screenshot", "get_content", "get_page_info"}
+# Names that must no longer be registered: the pre-rebuild server's tools, plus the 5
+# retired in v0.3.0 after telemetry measured them unused (see docs/CHANGELOG.md).
+LEGACY_TOOLS = {
+    "kill_session",
+    "take_snapshot",
+    "take_screenshot",
+    "get_content",
+    "get_page_info",
+    "drag",
+    "go_forward",
+    "hover",
+    "performance_summary",
+    "type_text",
+}
 
 
 async def test_all_tools_registered(client: Client) -> None:
+    """The registered set is exactly EXPECTED_TOOLS, not merely a superset.
+
+    A subset check lets an unlisted tool ship unnoticed, and the payload budget is
+    measured per tool, so every addition has to be declared here on purpose.
+    """
     tools = await client.list_tools()
     names = {t.name for t in tools}
-    assert EXPECTED_TOOLS.issubset(names), f"Missing: {EXPECTED_TOOLS - names}"
+    assert names == EXPECTED_TOOLS, (
+        f"Missing: {EXPECTED_TOOLS - names}; unexpected: {names - EXPECTED_TOOLS}"
+    )
     assert not (LEGACY_TOOLS & names), f"Legacy tools still present: {LEGACY_TOOLS & names}"
 
 
@@ -70,9 +86,19 @@ async def test_every_tool_requires_profile(client: Client) -> None:
 
 
 async def test_navigate_starts_session(client: Client, flask_server: str) -> None:
+    """The first call for a profile launches a browser and reports the landed URL.
+
+    The old `"MCP Tool Test Pages" in text or "navigated" in text.lower()` could not
+    fail on the first branch: navigate never returns page content, and its success
+    string always contains "Navigated", so the disjunction only ever tested that the
+    call did not error.
+    """
     result = await client.call_tool("navigate", {"url": f"{flask_server}/", "profile": PROFILE})
     text = tool_text(result)
-    assert "MCP Tool Test Pages" in text or "navigated" in text.lower()
+    assert text == f"Navigated to: MCP Tool Test Pages ({flask_server}/)", text
+
+    listing = tool_text(await client.call_tool("list_sessions", {}))
+    assert f"Session '{PROFILE}'" in listing, listing
 
 
 async def test_navigate_bad_url(client: Client) -> None:

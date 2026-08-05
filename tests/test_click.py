@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from tests.helpers import PROFILE, evaluate, extract_uid, goto_and_find, text_content, tool_text
@@ -41,8 +42,9 @@ async def test_click_counter(client: Client, flask_server: str) -> None:
     await client.call_tool("click", {"profile": PROFILE, "uid": uid})
     await client.call_tool("click", {"profile": PROFILE, "uid": uid})
 
+    # Exactly two, not "a 2 appears somewhere": a substring check also accepts 12 or 20.
     js = await text_content(client, PROFILE, "counter-output")
-    assert "2" in js
+    assert json.loads(js) == "Clicked 2 time(s)", js
 
 
 async def test_click_invalid_uid(client: Client, flask_server: str) -> None:
@@ -113,7 +115,7 @@ async def test_click_observe_snapshot_yields_usable_uids(client: Client, flask_s
     assert "clicked" in follow.lower()
 
     js = await text_content(client, PROFILE, "counter-output")
-    assert "1" in js
+    assert json.loads(js) == "Clicked 1 time(s)", js
 
 
 async def test_click_observe_text_truncates(client: Client, flask_server: str) -> None:

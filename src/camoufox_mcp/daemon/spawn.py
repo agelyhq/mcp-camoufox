@@ -10,12 +10,15 @@ from typing import TYPE_CHECKING
 import httpx
 from filelock import FileLock, Timeout
 
-from camoufox_mcp.daemon.endpoint import ENDPOINT, IS_WINDOWS
+from camoufox_mcp.daemon import paths
+from camoufox_mcp.daemon.endpoint import IS_WINDOWS
 from camoufox_mcp.daemon.errors import DaemonSpawnError
-from camoufox_mcp.daemon.identity import health_matches_identity, local_identity
+from camoufox_mcp.daemon.identity import local_identity
 
 if TYPE_CHECKING:
     from camoufox_mcp.config import ServerConfig
+    from camoufox_mcp.daemon.endpoint import DaemonEndpoint
+    from camoufox_mcp.daemon.identity import DaemonIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -26,38 +29,41 @@ _ADDRESS_REMOVAL_DEADLINE_S = 15.0
 _POLL_INTERVAL_S = 0.2
 
 
-def ensure_daemon(config: ServerConfig) -> None:
+def ensure_daemon(config: ServerConfig, endpoint: DaemonEndpoint) -> None:
     """Guarantee a code-matching daemon is listening before proxying.
 
-    Runs once at proxy start. A healthy, matching daemon is reused as-is; a healthy
-    but mismatched idle daemon is shut down and replaced; anything else is (re)spawned
-    under an exclusive file lock so concurrent proxies never double-spawn.
+    Runs at proxy start and again whenever a request finds the daemon gone. A healthy,
+    matching daemon is reused as-is; a healthy but mismatched idle daemon is shut down
+    and replaced; anything else is (re)spawned under an exclusive file lock so
+    concurrent proxies never double-spawn.
     """
-    identity = local_identity()
-    health = _probe_health(config)
+    identity = local_identity(config)
+    health = probe_health(config, endpoint)
     if health is not None:
-        if health_matches_identity(health, identity):
+        if identity.matches(health):
             return
-        if int(health.get("active_sessions", 0)) == 0:
-            logger.info("Replacing idle mismatched daemon")
-            _request_shutdown(config)
-            _wait_unpublished(config)
-        else:
-            print(
-                "camoufox-mcp: reusing a daemon running different code (has active "
-                "sessions; not restarting it)",
-                file=sys.stderr,
-            )
+        if int(health.get("active_sessions", 0)) > 0:
+            _warn_reusing_mismatched("has active sessions")
             return
-    _spawn_locked(config, identity)
+        logger.info("Replacing idle mismatched daemon")
+        _request_shutdown(config, endpoint)
+        _wait_unpublished(config, endpoint)
+    _spawn_locked(config, endpoint, identity)
 
 
-def _probe_health(config: ServerConfig) -> dict | None:
-    conn = ENDPOINT.resolve(config)
+def _warn_reusing_mismatched(reason: str) -> None:
+    print(
+        f"mcp-camoufox: reusing a daemon running different code ({reason}; not restarting it)",
+        file=sys.stderr,
+    )
+
+
+def probe_health(config: ServerConfig, endpoint: DaemonEndpoint) -> dict | None:
+    conn = endpoint.resolve(config)
     if conn is None:
         return None
     try:
-        with ENDPOINT.sync_client(conn, timeout=_PROBE_TIMEOUT_S) as client:
+        with endpoint.sync_client(conn, timeout=_PROBE_TIMEOUT_S) as client:
             response = client.get("/health")
     except (httpx.HTTPError, OSError):
         return None
@@ -69,18 +75,18 @@ def _probe_health(config: ServerConfig) -> dict | None:
         return None
 
 
-def _request_shutdown(config: ServerConfig) -> None:
-    conn = ENDPOINT.resolve(config)
+def _request_shutdown(config: ServerConfig, endpoint: DaemonEndpoint) -> None:
+    conn = endpoint.resolve(config)
     if conn is None:
         return
     try:
-        with ENDPOINT.sync_client(conn) as client:
+        with endpoint.sync_client(conn) as client:
             client.post("/shutdown")
     except (httpx.HTTPError, OSError):
         logger.debug("shutdown request to daemon failed", exc_info=True)
 
 
-def _wait_unpublished(config: ServerConfig) -> None:
+def _wait_unpublished(config: ServerConfig, endpoint: DaemonEndpoint) -> None:
     """Block until the old daemon has withdrawn its address advert, then return.
 
     A dead health probe is not enough: uvicorn stops answering seconds before the
@@ -90,35 +96,55 @@ def _wait_unpublished(config: ServerConfig) -> None:
     """
     deadline = time.monotonic() + _ADDRESS_REMOVAL_DEADLINE_S
     while time.monotonic() < deadline:
-        if ENDPOINT.resolve(config) is None:
+        if endpoint.resolve(config) is None:
             return
         time.sleep(_POLL_INTERVAL_S)
 
 
-def _spawn_locked(config: ServerConfig, identity: tuple[str, str]) -> None:
-    config.ensure_daemon_dir()  # 0o700 parent gates the lock/advert/log before spawn
-    lock = FileLock(str(config.daemon_lock_path))
+def _spawn_locked(config: ServerConfig, endpoint: DaemonEndpoint, identity: DaemonIdentity) -> None:
+    paths.ensure_daemon_dir(config)  # 0o700 parent gates the lock and log before spawn
+    lock_path = paths.lock_path(config)
+    lock = FileLock(str(lock_path))
     try:
         lock.acquire(timeout=_SPAWN_LOCK_DEADLINE_S, poll_interval=_POLL_INTERVAL_S)
     except Timeout as exc:
-        raise DaemonSpawnError(
-            f"timed out waiting for the daemon spawn lock {config.daemon_lock_path}"
-        ) from exc
+        raise DaemonSpawnError(f"timed out waiting for the daemon spawn lock {lock_path}") from exc
     try:
         # Another proxy may have spawned a matching daemon while we waited.
-        health = _probe_health(config)
-        if health is not None and health_matches_identity(health, identity):
+        health = probe_health(config, endpoint)
+        if health is not None and identity.matches(health):
             return
-        ENDPOINT.cleanup(config)  # drop any stale advert from a crashed daemon
+        if not _reclaim_advert(config, endpoint):
+            _warn_reusing_mismatched("it still answers on the control channel")
+            return
         _popen_daemon(config)
-        _wait_healthy(config, identity)
+        _wait_healthy(config, endpoint, identity)
     finally:
         lock.release()
 
 
+def _reclaim_advert(config: ServerConfig, endpoint: DaemonEndpoint) -> bool:
+    """Free the control address for a fresh bind, never at a live daemon's expense.
+
+    A shutdown request the daemon refused (a session landed after the health probe
+    said it was idle) leaves it running and reachable only through this advert.
+    Removing it there would strand its browsers, so the advert is dropped only when
+    nothing answers on it AND it is still the exact one just inspected. ``False``
+    means the address belongs to a daemon that is still alive: reuse it, do not
+    replace it.
+    """
+    advert_id = endpoint.advert_id(config)
+    if advert_id is None:
+        return True
+    if probe_health(config, endpoint) is not None:
+        logger.warning("Daemon at the control address is still serving; keeping its advert")
+        return False
+    return endpoint.cleanup_if_owned(config, advert_id)
+
+
 def _popen_daemon(config: ServerConfig) -> None:
     # daemon_dir already exists (0o700) via ensure_daemon_dir in _spawn_locked.
-    log_file = open(config.daemon_log_path, "ab")  # noqa: SIM115 (child owns the fd)
+    log_file = open(paths.log_path(config), "ab")  # noqa: SIM115 (child owns the fd)
     try:
         subprocess.Popen(
             [sys.executable, "-m", "camoufox_mcp.daemon"],
@@ -144,22 +170,22 @@ def _detach_kwargs() -> dict:
     return {"start_new_session": True}
 
 
-def _wait_healthy(config: ServerConfig, identity: tuple[str, str]) -> None:
+def _wait_healthy(config: ServerConfig, endpoint: DaemonEndpoint, identity: DaemonIdentity) -> None:
     deadline = time.monotonic() + _HEALTHY_DEADLINE_S
     while time.monotonic() < deadline:
-        health = _probe_health(config)
-        if health is not None and health_matches_identity(health, identity):
+        health = probe_health(config, endpoint)
+        if health is not None and identity.matches(health):
             return
         time.sleep(_POLL_INTERVAL_S)
     raise DaemonSpawnError(
         f"daemon did not become healthy within {_HEALTHY_DEADLINE_S:.0f}s.\n"
-        f"--- {config.daemon_log_path} (tail) ---\n{_log_tail(config)}"
+        f"--- {paths.log_path(config)} (tail) ---\n{_log_tail(config)}"
     )
 
 
 def _log_tail(config: ServerConfig, lines: int = 40) -> str:
     try:
-        text = config.daemon_log_path.read_text(encoding="utf-8", errors="replace")
+        text = paths.log_path(config).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return "(no daemon.log)"
     return "\n".join(text.splitlines()[-lines:])

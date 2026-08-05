@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Waiting Test{% endblock %}
+{% block content %}
+<h1>Waiting Test</h1>
+<p>Everything actionable on this page is inserted after a delay, so an action that
+does not wait fails instantly.</p>
+
+<div class="section">
+  <h2>Late Content</h2>
+  <div id="host"></div>
+  <div id="late-output" class="output">nothing yet</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  setTimeout(function () {
+    var host = document.getElementById('host');
+    var button = document.createElement('button');
+    button.id = 'late-btn';
+    button.textContent = 'Late button';
+    button.addEventListener('click', function () {
+      document.getElementById('late-output').textContent = 'late button clicked';
+    });
+    host.appendChild(button);
+
+    var field = document.createElement('input');
+    field.id = 'late-field';
+    field.type = 'text';
+    field.addEventListener('input', function () {
+      document.getElementById('late-output').textContent = 'late field: ' + this.value;
+    });
+    host.appendChild(field);
+  }, 700);
+</script>
+{% endblock %}

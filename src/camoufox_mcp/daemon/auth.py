@@ -13,7 +13,7 @@ class TokenAuthMiddleware:
     """Reject any HTTP request that does not present the daemon's bearer token.
 
     On Windows the daemon's control channel is a ``127.0.0.1`` TCP socket, which
-    any local process can reach — there is no Unix-socket file mode to gate it. A
+    any local process can reach, and there is no Unix-socket file mode to gate it. A
     per-daemon secret guards every route instead (``/health``, ``/shutdown`` and
     the MCP endpoint). POSIX daemons keep their 0o600 Unix socket and never mount
     this middleware.

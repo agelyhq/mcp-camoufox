@@ -68,8 +68,8 @@ def schedule_self_terminate(delay: float = 0.1) -> None:
     Deferred so an in-flight response (e.g. the /shutdown reply) flushes first.
     uvicorn installs a SIGTERM handler via ``signal.signal`` and its tick loop
     picks the signal up within ~0.1s. On Windows ``os.kill`` with a non-CTRL signal
-    would call TerminateProcess — an abrupt kill that skips uvicorn's graceful
-    shutdown and the daemon's endpoint cleanup — so the signal is raised in-process
+    would call TerminateProcess, an abrupt kill that skips uvicorn's graceful
+    shutdown and the daemon's endpoint cleanup, so the signal is raised in-process
     there instead.
     """
     loop = asyncio.get_running_loop()

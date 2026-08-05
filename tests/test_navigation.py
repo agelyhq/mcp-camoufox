@@ -10,7 +10,12 @@ if TYPE_CHECKING:
     from fastmcp import Client
 
 
-async def test_back_forward_reload(client: Client, flask_server: str) -> None:
+async def test_back_and_reload(client: Client, flask_server: str) -> None:
+    """Going back moves the tab, so it reports the page; reloading stays put.
+
+    Neither tool restates its own URL: the "[page]" line is the single carrier for
+    where the tab is, so the same fact never appears in 2 shapes.
+    """
     first = f"{flask_server}/click"
     second = f"{flask_server}/snapshot"
 
@@ -18,23 +23,17 @@ async def test_back_forward_reload(client: Client, flask_server: str) -> None:
     await client.call_tool("navigate", {"url": second, "profile": PROFILE})
 
     back = tool_text(await client.call_tool("go_back", {"profile": PROFILE}))
-    assert "went back" in back.lower()
-    assert "/click" in back
-
-    forward = tool_text(await client.call_tool("go_forward", {"profile": PROFILE}))
-    assert "went forward" in forward.lower()
-    assert "/snapshot" in forward
+    assert back == f"Went back to: Click Test\n[page] Click Test | {first}", back
 
     reloaded = tool_text(await client.call_tool("reload", {"profile": PROFILE}))
-    assert "reloaded" in reloaded.lower()
-    assert "/snapshot" in reloaded
+    assert reloaded == "Reloaded: Click Test", reloaded
 
 
-async def test_go_forward_no_history(client: Client, flask_server: str) -> None:
+async def test_go_back_no_history(client: Client, flask_server: str) -> None:
     await client.call_tool("navigate", {"url": f"{flask_server}/click", "profile": PROFILE})
 
-    result = tool_text(await client.call_tool("go_forward", {"profile": PROFILE}))
-    assert "no next page" in result.lower()
+    result = tool_text(await client.call_tool("go_back", {"profile": PROFILE}))
+    assert "no previous page" in result.lower()
 
 
 async def test_navigate_observe_none_is_default(client: Client, flask_server: str) -> None:

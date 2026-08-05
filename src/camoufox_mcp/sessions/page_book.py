@@ -1,20 +1,34 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from camoufox_mcp.sessions.pages import PageInfo
+from camoufox_mcp.sessions.errors import NoActivePageError, UnknownPageIndexError
 
 if TYPE_CHECKING:
     from camoufox_mcp.sessions.page import Page
 
 
+@dataclass(frozen=True)
+class PageInfo:
+    """Public view of a single tab for listing purposes."""
+
+    index: int
+    page: Page
+    is_active: bool
+
+
 class PageBook:
-    """Multi-tab bookkeeping for one session: stable integer indices + active tab."""
+    """Multi-tab bookkeeping for one session: stable integer indices + active tab.
+
+    ``None`` is the absence of an active tab, and it is a state the book reaches on
+    its own: closing the last tab leaves the session with nothing to act on.
+    """
 
     def __init__(self) -> None:
         self._pages: dict[int, Page] = {}
         self._next_index: int = 0
-        self._active_index: int = -1
+        self._active_index: int | None = None
 
     @property
     def count(self) -> int:
@@ -22,9 +36,9 @@ class PageBook:
 
     @property
     def active(self) -> Page:
-        page = self._pages.get(self._active_index)
+        page = None if self._active_index is None else self._pages.get(self._active_index)
         if page is None:
-            raise RuntimeError("No active page in this session")
+            raise NoActivePageError
         return page
 
     def add(self, page: Page) -> int:
@@ -35,16 +49,14 @@ class PageBook:
         return index
 
     def remove(self, index: int) -> Page:
-        if index not in self._pages:
-            raise ValueError(f"no page at index {index}")
+        self._require(index)
         page = self._pages.pop(index)
         if self._active_index == index:
-            self._active_index = next(iter(self._pages), -1)
+            self._active_index = next(iter(self._pages), None)
         return page
 
     def select(self, index: int) -> None:
-        if index not in self._pages:
-            raise ValueError(f"no page at index {index}")
+        self._require(index)
         self._active_index = index
 
     def items(self) -> list[PageInfo]:
@@ -55,3 +67,7 @@ class PageBook:
 
     def all_pages(self) -> list[Page]:
         return list(self._pages.values())
+
+    def _require(self, index: int) -> None:
+        if index not in self._pages:
+            raise UnknownPageIndexError(index)

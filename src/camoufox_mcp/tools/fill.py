@@ -4,7 +4,8 @@ from typing import TYPE_CHECKING
 
 from camoufox_mcp.dom import fill_field
 from camoufox_mcp.tools._base import get_page, get_session, tool
-from camoufox_mcp.tools._observe import observe_suffix, validate_observe
+from camoufox_mcp.tools._observe import ObserveMode, validate_observe
+from camoufox_mcp.tools._target import resolve_target
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -21,58 +22,24 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
         *,
         value: str,
         clear_first: bool = True,
-        observe: str = "none",
+        observe: ObserveMode = "none",
     ) -> str:
-        """Set a field's value by uid or selector: input, textarea, select or contenteditable.
+        """Set a field's value: input, textarea, select, checkbox, radio, contenteditable.
 
-        Provide EXACTLY ONE of ``uid`` or ``selector`` (both or neither raises). The
-        uid path focuses the snapshot element and types; the selector path is
-        Playwright-native and fills the FIRST match.
+        The field's kind decides what happens: a ``<select>`` picks the option matching
+        ``value`` against option values then labels; a checkbox or radio is clicked to
+        reach the state ``value`` asks for; anything else is typed into with real keys.
 
-        On a ``<select>`` the uid path picks the matching option instead of typing:
-        ``value`` is matched against each option's value, then its visible label,
-        then its label case-insensitively.
-
-        Parameters:
-        - profile: session/profile name.
-        - uid: uid of the field from the latest snapshot. Take a ``snapshot`` first.
-        - selector: CSS selector; the first match wins (``locator(selector).first``).
-          Prefer this when you already know the field's selector, e.g.
-          ``selector="#email"``.
-        - value: text to enter (required).
-        - clear_first: when true (default) the existing content is cleared before
-          typing; when false the value is appended after the current content.
-        - observe: post-action observation appended to the result — ``"none"``
-          (default), ``"snapshot"`` (fresh uid tree; refreshes uids like calling
-          ``snapshot``) or ``"text"`` (page body innerText, capped at 4000 chars).
-          Example: ``observe="text"`` to fill then read back the rendered page.
-
-        Returns a confirmation like ``Filled <input> with 12 chars`` (uid),
-        ``Filled #email with 12 chars`` (selector) or ``Selected 'Cherry' in
-        <select>``, optionally followed by the observation block.
-
-        Errors:
-        - ``Error: ValueError: provide exactly one of uid or selector``.
-        - ``Error: ValueError: invalid observe '<v>'; ...`` for an unknown observe.
-        - ``Error: ValueError: unknown or stale uid '<uid>'; take a new snapshot``.
-        - ``Error: ValueError: element <tag> is not editable; ...`` (uid path) when
-          the target is not an input, textarea, select or contenteditable element.
-        - ``Error: ValueError: no option matching '<v>'; available options are ...``
-          when a ``<select>`` has no option with that value or label.
+        Args:
+            value: Text to enter, or "true"/"false" for a checkbox or radio.
+            clear_first: Replace the existing content (default), or append to it.
         """
         validate_observe(observe)
-        if (uid is None) == (selector is None):
-            raise ValueError("provide exactly one of uid or selector")
         session = await get_session(deps, profile)
         page = get_page(session)
-        if uid is not None:
-            result = await fill_field(page, uid, value, clear_first)
-        else:
-            locator = page.raw.locator(selector).first
-            if clear_first:
-                await locator.fill(value)
-            else:
-                await locator.focus()
-                await locator.press_sequentially(value)
-            result = f"Filled {selector} with {len(value)} chars"
-        return result + await observe_suffix(page, observe)
+        target = await resolve_target(page, uid, selector)
+
+        result = await fill_field(page, target, value, clear_first)
+        if selector is not None:
+            result += f" via {selector}"
+        return result

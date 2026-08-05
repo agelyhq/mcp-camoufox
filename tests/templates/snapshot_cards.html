@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Snapshot Cards{% endblock %}
+{% block extra_css %}
+    /* One styled container per card. `cursor` inherits, so every node inside a card
+       reports pointer while only the card itself is a click target. */
+    .card { cursor: pointer; border: 1px solid #ccc; border-radius: 6px;
+      padding: 12px; margin-bottom: 8px; }
+    .card-body { padding: 4px; }
+    .card-tag { display: inline-block; font-size: 0.8rem; color: #555; }
+{% endblock %}
+{% block content %}
+<h1>Snapshot Cards</h1>
+
+<div class="grid">
+  <div class="card" data-card="alpha">
+    <div class="card-body">
+      <h3>Card alpha</h3>
+      <p>Summary alpha</p>
+      <span class="card-tag">Tag alpha</span>
+    </div>
+  </div>
+
+  <div class="card" data-card="beta">
+    <div class="card-body">
+      <h3>Card beta</h3>
+      <p>Summary beta</p>
+      <span class="card-tag">Tag beta</span>
+    </div>
+  </div>
+
+  <div class="card" data-card="gamma">
+    <div class="card-body">
+      <h3>Card gamma</h3>
+      <p>Summary gamma</p>
+      <span class="card-tag">Tag gamma</span>
+    </div>
+  </div>
+</div>
+
+<!-- A real control inside a pointer region: it keeps its own uid, because it brings a
+     signal the inherited cursor does not. -->
+<div class="card" data-card="delta">
+  <div class="card-body">
+    <h3>Card delta</h3>
+    <button id="card-action">Card action</button>
+  </div>
+</div>
+{% endblock %}

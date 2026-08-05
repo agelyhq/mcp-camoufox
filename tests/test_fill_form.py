@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from tests.helpers import PROFILE, evaluate, extract_uid, tool_text
@@ -28,9 +29,10 @@ async def test_fill_form_multiple_fields(client: Client, flask_server: str) -> N
             },
         )
     )
-    assert "3" in result
-    assert "filled" in result.lower()
+    assert result == "Filled 3 field(s)", result
 
+    # Exact values in exact fields: three substring checks over one blob would also
+    # pass if every value had landed in the same input.
     js = await evaluate(
         client,
         PROFILE,
@@ -38,9 +40,7 @@ async def test_fill_form_multiple_fields(client: Client, flask_server: str) -> N
         "document.getElementById('ff-last').value,"
         "document.getElementById('ff-city').value])",
     )
-    assert "Ada" in js
-    assert "Lovelace" in js
-    assert "London" in js
+    assert json.loads(json.loads(js)) == ["Ada", "Lovelace", "London"], js
 
 
 async def test_fill_form_malformed_entry(client: Client, flask_server: str) -> None:
@@ -55,3 +55,31 @@ async def test_fill_form_malformed_entry(client: Client, flask_server: str) -> N
         )
     )
     assert "error" in result.lower()
+
+
+async def test_fill_form_handles_a_checkbox(client: Client, flask_server: str) -> None:
+    """A checkbox inside the form no longer makes the whole call a silent no-op."""
+    await client.call_tool("navigate", {"url": f"{flask_server}/fill-form", "profile": PROFILE})
+    snap = tool_text(await client.call_tool("snapshot", {"profile": PROFILE}))
+
+    result = tool_text(
+        await client.call_tool(
+            "fill_form",
+            {
+                "profile": PROFILE,
+                "fields": [
+                    {"uid": extract_uid(snap, "First name"), "value": "Grace"},
+                    {"uid": extract_uid(snap, "Subscribe"), "value": "true"},
+                ],
+            },
+        )
+    )
+    assert result == "Filled 2 field(s)", result
+
+    js = await evaluate(
+        client,
+        PROFILE,
+        "JSON.stringify([document.getElementById('ff-first').value,"
+        "document.getElementById('ff-optin').checked])",
+    )
+    assert json.loads(json.loads(js)) == ["Grace", True], js

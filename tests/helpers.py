@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from typing import TYPE_CHECKING
 
@@ -24,12 +25,19 @@ _OPTIONAL_ENV_VARS = (
 def isolate_camoufox_env(monkeypatch: pytest.MonkeyPatch, data_dir: Path, **overrides: str) -> None:
     """Point config at an isolated ``data_dir`` and clear inherited CAMOUFOX_* vars.
 
-    Applies headless=true / auto_update=false defaults plus the data dir, then any
-    ``overrides`` (full env var names, e.g. ``CAMOUFOX_HEADLESS="virtual"``), and
-    finally deletes the optional per-session vars so the host environment never leaks.
+    Applies auto_update=false plus the data dir, then any ``overrides`` (full env var
+    names, e.g. ``CAMOUFOX_HEADLESS="virtual"``), and finally deletes the optional
+    per-session vars so the host environment never leaks.
+
+    ``CAMOUFOX_HEADLESS`` is the one inherited var kept on purpose: it defaults to
+    ``"true"`` so a bare run is deterministic and display-less, but an ambient value is
+    honoured so the whole suite can be run under ``CAMOUFOX_HEADLESS=virtual`` (the
+    recommended invisible Linux mode). Hard-setting it made that run a no-op that looked
+    like coverage. A test whose assertion depends on a specific mode must pass it as an
+    override rather than rely on the default.
     """
     env = {
-        "CAMOUFOX_HEADLESS": "true",
+        "CAMOUFOX_HEADLESS": os.environ.get("CAMOUFOX_HEADLESS") or "true",
         "CAMOUFOX_AUTO_UPDATE": "false",
         "CAMOUFOX_DATA_DIR": str(data_dir),
         **overrides,

@@ -13,16 +13,11 @@ if TYPE_CHECKING:
 def register(mcp: FastMCP, deps: ToolDeps) -> None:
     @tool(mcp, deps)
     async def press_key(profile: str, key: str) -> str:
-        """Press a single key or key combination on the focused element.
+        """Press a key or key combination on the focused element.
 
-        Uses Playwright key names. Examples: ``Enter``, ``Escape``, ``Tab``,
-        ``ArrowDown``, ``Backspace``, ``Control+A``, ``Shift+Tab``.
-
-        Parameters:
-        - profile: session/profile name.
-        - key: the key or ``Modifier+Key`` combination to press.
-
-        Returns a confirmation like ``Pressed Enter``.
+        Args:
+            key: Playwright key name: Enter, Escape, Tab, ArrowDown, Backspace,
+                Control+A, Shift+Tab.
         """
         session = await get_session(deps, profile)
         page = get_page(session)
