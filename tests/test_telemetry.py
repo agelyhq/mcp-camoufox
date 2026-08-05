@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 from fastmcp import Client
 
+from tests.helpers import extract_uid, tool_text
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -38,8 +40,9 @@ async def test_tool_call_appends_jsonl(client: Client, flask_server: str, data_d
     assert record["duration_ms"] >= 0
     assert record["ok"] is True
     assert record["error"] is None
-    assert isinstance(record["result"], str)
-    assert record["result"]
+    # The record carries what the caller was told, verbatim. A truthiness check on
+    # `result` accepted any non-empty string, including an error note.
+    assert record["result"] == f"Navigated to: MCP Tool Test Pages ({flask_server}/)"
     # ts must be an ISO-8601 UTC timestamp.
     assert record["ts"].endswith("+00:00") or record["ts"].endswith("Z")
 
@@ -50,7 +53,11 @@ async def test_error_call_is_logged(client: Client, data_dir: Path) -> None:
     record = _read_last_record(data_dir / "logs" / "telem_err.jsonl")
     assert record["tool"] == "navigate"
     assert record["ok"] is False
-    assert record["error"] is not None
+    # "is not None" accepted "", a dict, or a multi-line Playwright dump. The logged
+    # error is contractually a single "<Type>: <message>" line, because it is what a
+    # release grep counts failures by.
+    assert re.fullmatch(r"\w+: .+", record["error"]), record["error"]
+    assert record["result"].startswith("Error: "), record["result"]
 
 
 async def test_profileless_tool_logs_to_server_file(client: Client, data_dir: Path) -> None:
@@ -152,6 +159,41 @@ async def test_session_closed_on_shutdown(
     assert marker["args"] == {"reason": "shutdown"}
 
 
+async def test_session_closed_on_close_session_tool(
+    mcp_server: FastMCP, flask_server: str, data_dir: Path
+) -> None:
+    """The agent-driven close is the common case and must emit the marker too.
+
+    Measured on the production logs, 147 of 159 profiles ended on an explicit
+    ``close_session`` call, so a marker emitted only from ``shutdown()`` was silent
+    for every one of them: 0 records across 119 server starts.
+    """
+    profile = "closer_tool"
+    async with Client(mcp_server) as c:
+        await c.call_tool("navigate", {"url": f"{flask_server}/", "profile": profile})
+        await c.call_tool("close_session", {"profile": profile})
+        # Emitted at close time, not deferred to teardown: it is readable already.
+        records = _read_records(data_dir / "logs" / f"{profile}.jsonl")
+        closed = [r for r in records if r["tool"] == "session_closed"]
+        assert len(closed) == 1, f"expected 1 session_closed, got {len(closed)}"
+        assert closed[0]["args"] == {"reason": "close_session"}
+        assert closed[0]["profile"] == profile
+        assert closed[0]["ok"] is True
+
+    # Shutdown must not log a second marker for a session already closed, and closing
+    # an idle profile stays silent (the tool answers "nothing to close").
+    records = _read_records(data_dir / "logs" / f"{profile}.jsonl")
+    assert len([r for r in records if r["tool"] == "session_closed"]) == 1
+
+
+async def test_close_session_on_idle_profile_emits_nothing(client: Client, data_dir: Path) -> None:
+    """No session existed, so no session_closed marker may claim one did."""
+    await client.call_tool("close_session", {"profile": "never_live"})
+
+    records = _read_records(data_dir / "logs" / "never_live.jsonl")
+    assert [r["tool"] for r in records] == ["close_session"]
+
+
 async def test_screenshot_image_metrics(client: Client, flask_server: str, data_dir: Path) -> None:
     await client.call_tool("navigate", {"url": f"{flask_server}/screenshot", "profile": "shot"})
     await client.call_tool("screenshot", {"profile": "shot"})
@@ -167,3 +209,24 @@ async def test_screenshot_image_metrics(client: Client, flask_server: str, data_
     # An image-only result carries no character count and a placeholder note.
     assert record["result_chars"] is None
     assert record["result"] == "<Image>"
+
+
+async def test_intercepted_click_is_greppable(
+    client: Client, flask_server: str, data_dir: Path
+) -> None:
+    """Issue 9 gets its own class so a covered click is measurable in the JSONL."""
+    profile = "telem_intercept"
+    await client.call_tool("navigate", {"url": f"{flask_server}/overlay", "profile": profile})
+    snap = tool_text(await client.call_tool("snapshot", {"profile": profile}))
+    uid = extract_uid(snap, "Target")
+    await client.call_tool(
+        "evaluate",
+        {"profile": profile, "script": "document.getElementById('veil').style.display = 'block'"},
+    )
+
+    await client.call_tool("click", {"profile": profile, "uid": uid})
+
+    record = _read_last_record(data_dir / "logs" / f"{profile}.jsonl")
+    assert record["tool"] == "click"
+    assert record["ok"] is False
+    assert record["error"].startswith("ElementInterceptedError: ")

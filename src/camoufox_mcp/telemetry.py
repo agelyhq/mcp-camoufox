@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from camoufox_mcp.config import ensure_private_dir
+from camoufox_mcp.profile_name import is_valid_profile
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,7 +63,7 @@ class TelemetryLogger:
     def log(self, record: UsageRecord) -> None:
         try:
             ensure_private_dir(self._dir)
-            name = f"{record.profile or _SERVER_LOG}.jsonl"
+            name = f"{_log_stem(record.profile)}.jsonl"
             payload = asdict(record)
             extra = payload.pop("extra", None) or {}
             payload.update(extra)  # flatten tool-specific analytics onto the line
@@ -71,6 +72,21 @@ class TelemetryLogger:
                 fh.write(line + "\n")
         except Exception:
             logger.debug("Telemetry write failed", exc_info=True)
+
+
+def _log_stem(profile: str | None) -> str:
+    """The file a record lands in: its profile, or the shared ``_server`` bucket.
+
+    A record is written for every tool call, including one whose profile name the
+    session layer rejected, so the name reaches this path builder unfiltered.
+    Measured against the previous code, ``../../x`` and ``/tmp/x`` both wrote the
+    JSONL file outside the logs directory, and a real call created
+    ``qa-portal">\\n.jsonl``. Anything that is not a safe token is routed to the
+    server bucket instead: the record keeps its true ``profile`` value, so nothing is
+    lost, only the file it lands in changes. This logger must never raise, which is
+    why the record is rerouted here rather than rejected.
+    """
+    return profile if is_valid_profile(profile) else _SERVER_LOG
 
 
 def now_iso() -> str:
