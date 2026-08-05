@@ -106,10 +106,17 @@ sitting on top of it can undo all of that in 1 line, so this one holds a contrac
   a page that replaces `Map`, `Event`, `DataTransfer`, `getSelection` or an iterator after
   that point counts nothing.
 
-This is checked by `tests/test_no_markers.py` on every path that consumes a uid, and that
-test carries its own control: it deliberately triggers each of the 4 signals to prove its
-probes can see them. A probe that detects nothing because it is broken would otherwise pass
-forever.
+This is checked by `tests/test_no_markers.py` on every path that consumes a uid, in a session
+launched with no extension at all. That matters: Camoufox ships uBlock Origin in every
+browser it starts, and uBO writes a `<script>` into `<head>` then removes it. Counted without
+the exclusion, those 3 records read as ours, which is precisely how a release run failed.
+`CAMOUFOX_BUNDLED_ADDONS=false` is what removes it, and every mutation the probes record
+names its target, because a bare count cannot tell our leak from the browser's own work.
+
+The test carries 2 controls, so nothing here can pass because an instrument is broken. One
+deliberately triggers each of the 4 signals and proves the probes see them. The other proves
+the extension reading really finds uBlock Origin when it is left in place, since a reading
+that always came back empty would certify every browser as clean.
 
 ### The limits, stated rather than glossed over
 
