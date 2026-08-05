@@ -6,26 +6,26 @@ in the page realm, and any listener added to ``window``. :mod:`tests.test_no_mar
 asserts that our footprint is empty; :mod:`tests.test_driver_footprint` pins the one
 driver-level artifact that is not ours. How the tally is taken lives here, once.
 
-Two actors other than us can reach the page, and both are accounted for rather than
-assumed away. Camoufox adds uBlock Origin to every launch of its own accord
-(``exclude_addons`` is the only way out and nothing passes it), so
-``CAMOUFOX_ADDON_URLS=""`` drops this server's own default, the cookie blocker that
-writes a class onto <html>, and not the browser's extension. That extension has no filter
-for a loopback host and was measured inserting nothing into one, from document_start
-onwards; its one page-writing path appends a <script> to <head> and removes it again,
-which the record format below names outright rather than leaving as a bare count. The
-other actor is the HTML parser, which is why :func:`arm_probes` refuses an unfinished
-document.
+Two actors other than us could reach the page, and neither is assumed away. Camoufox adds
+uBlock Origin to every launch of its own accord, whatever ``CAMOUFOX_ADDON_URLS`` says, and
+its one page-writing path appends a <script> to <head> and removes it again: 3 records that
+were read as ours on a release runner. So :func:`probe_server` drops this server's own
+default addon AND Camoufox's bundled one, and :func:`extensions_after_closing` reads back
+from the browser's own records that the launch really held none, because a setting is a
+request and this claim needs a measurement. The other actor is the HTML parser, which is why
+:func:`arm_probes` refuses an unfinished document. What is left able to write to the page is
+this server, the page's own script, and the driver.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import TYPE_CHECKING
 
-from tests.helpers import PROFILE, evaluate, server_for
-from tests.waits import poll_until
+from tests.helpers import PROFILE, evaluate, server_for, tool_text
+from tests.waits import poll_until, poll_until_sync
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -87,10 +87,104 @@ LEAK_WINDOW_S = 0.8
 PROBE_DEADLINE_S = 10.0
 PROBE_INTERVAL_S = 0.1
 
+# The addon id Camoufox's own DefaultAddons.UBO installs under. Camoufox names the addon by
+# download URL, and Firefox records it by id, so the id is spelled out here.
+UBO_ID = "uBlock0@raymondhill.net"
 
-def probe_server(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> FastMCP:
-    """A server with this project's own default addon dropped (see the module docstring)."""
-    return server_for(monkeypatch, data_dir, CAMOUFOX_ADDON_URLS="")
+# Guardrail on the 2 extension records existing at all, once the browser has exited. It is
+# not the wait that makes the reading trustworthy: closing the session is (see below).
+EXTENSION_RECORD_DEADLINE_S = 10.0
+
+_UUID_PREF = re.compile(r'user_pref\("extensions\.webextensions\.uuids", (".*")\);')
+_SHIPPED_LOCATION = "app-builtin"
+
+
+def probe_server(
+    monkeypatch: pytest.MonkeyPatch, data_dir: Path, *, bundled_addons: str = "false"
+) -> FastMCP:
+    """A server whose browser holds no extension at all (see the module docstring).
+
+    ``bundled_addons="true"`` is the control: it puts Camoufox's own uBlock Origin back
+    and changes nothing else, so the 2 browsers differ in exactly 1 setting.
+    """
+    return server_for(
+        monkeypatch,
+        data_dir,
+        CAMOUFOX_ADDON_URLS="",
+        CAMOUFOX_BUNDLED_ADDONS=bundled_addons,
+    )
+
+
+async def extensions_after_closing(client: Client, data_dir: Path) -> list[str]:
+    """Close the session, then read which extensions the browser it ran held.
+
+    The close is what makes the answer deterministic, and it is asserted here: a profile
+    that was never active would leave an unwritten record reading as a clean browser.
+    """
+    closed = tool_text(await client.call_tool("close_session", {"profile": PROFILE}))
+    assert closed.startswith(f"Closed session '{PROFILE}'"), closed
+    return extensions_the_browser_held(data_dir)
+
+
+def extensions_the_browser_held(data_dir: Path) -> list[str]:
+    """The ids of the extensions the browser held, Firefox's own excluded.
+
+    Firefox gives every webextension it loads a UUID and records the mapping in the
+    profile's ``prefs.js``; the addons it ships itself are the ones its own
+    ``extensions.json`` lists at an ``app-builtin`` location. The difference between the 2
+    is every extension somebody added to this browser, and for uBlock Origin it is the
+    only trace there is: Camoufox installs it temporarily, and a temporary install never
+    reaches ``extensions.json``.
+
+    **Call this only once the session is closed.** Firefox flushes prefs on a timer and
+    again at shutdown, and a live browser was measured 1 run in 10 having flushed its own
+    built-ins while uBlock Origin's UUID was still only in memory: an extension-holding
+    browser read as empty. Reading after the exit is what makes the empty answer mean
+    something. Both records are also required to be non-empty, so a Firefox that stopped
+    keeping them fails here instead of reporting a clean browser.
+    """
+    profile_dir = data_dir / "profiles" / PROFILE
+    poll_until_sync(
+        lambda: bool(_uuid_ids(profile_dir)) and bool(_shipped_ids(profile_dir)),
+        deadline=EXTENSION_RECORD_DEADLINE_S,
+    )
+    loaded, shipped = _uuid_ids(profile_dir), _shipped_ids(profile_dir)
+    assert loaded, (
+        f"prefs.js in {profile_dir} records no webextension UUID at all, so this "
+        f"measurement cannot tell an extension-free browser from an unread one"
+    )
+    assert shipped, (
+        f"extensions.json in {profile_dir} lists none of Firefox's own built-in addons, "
+        f"so every id below would read as an extension somebody added"
+    )
+    return sorted(loaded - shipped)
+
+
+def _uuid_ids(profile_dir: Path) -> set[str]:
+    """Every extension id in the profile's UUID pref, empty while it is unwritten.
+
+    The pref value is a JSON object inside a JS string literal, so it is decoded twice.
+    Firefox rewrites ``prefs.js`` through a temporary file and a rename, so a read either
+    sees the whole file or the previous one, never half of each.
+    """
+    prefs = profile_dir / "prefs.js"
+    if not prefs.is_file():
+        return set()
+    match = _UUID_PREF.search(prefs.read_text())
+    return set(json.loads(json.loads(match.group(1)))) if match else set()
+
+
+def _shipped_ids(profile_dir: Path) -> set[str]:
+    """The ids Firefox's own addon database marks as shipped with the browser."""
+    database = profile_dir / "extensions.json"
+    if not database.is_file():
+        return set()
+    addons = json.loads(database.read_text()).get("addons", [])
+    return {
+        addon["id"]
+        for addon in addons
+        if str(addon.get("location", "")).startswith(_SHIPPED_LOCATION)
+    }
 
 
 async def arm_probes(client: Client) -> None:

@@ -82,9 +82,10 @@ differentiators, credits), never grows a reference section, and names no other p
 - `SessionManager` is the only owner of live `Session` objects, created lazily on first
   use and never at startup. Launching locks per profile, never process-wide, and every
   teardown step runs under `deadlines.bounded` so a wedged tab cannot hang the exit.
-- The per-tab monitors rotate on the tab's own navigations, **main frame only**:
-  `framenavigated` fires for every iframe, and rotating on those emptied the listing an
-  agent was about to read.
+- The per-tab monitors rotate on the tab's own navigations, **main frame only**, and the
+  network one **by entry id**: the commit comes from the content process while requests come
+  from the HTTP layer, so a new document's fetch can sit in the ring, answered, before the
+  commit lands. Either wholesale rotation empties a listing an agent was about to read.
 - **Nothing we do is written to the page.** `Page.raw` is restricted to `mouse`,
   `keyboard`, `screenshot`, `goto`, `wait_for_load_state`; `screenshot` must pass
   `caret="initial"`; `evaluate_handle` may only ever build the registry object. Banned
@@ -92,9 +93,8 @@ differentiators, credits), never grows a reference section, and names no other p
   `page.<action>(selector, ...)`, every `ElementHandle` action. Both reasons are measured
   in `docs/architecture.md`. Guarded by `tests/test_no_markers.py`, whose probes
   (`tests/probes.py`) are proved able to detect each signal before asserting its absence,
-  refuse a document the parser has not finished, and name every mutation's target: a bare
-  count cannot tell our leak from the browser's. Camoufox adds uBlock Origin to every
-  launch whatever `CAMOUFOX_ADDON_URLS` says, so the page holds 1 actor more than it says.
+  refuse a document the parser has not finished, name every mutation's target, and run with
+  no extension at all: Camoufox ships uBlock Origin unless `CAMOUFOX_BUNDLED_ADDONS=false`.
 - No `await` in injected JS: `page.evaluate` has no deadline at any layer and a page can
   replace `Promise`. Every op is one synchronous turn, bounded from Python. No file under
   `dom/js/` may name this project: a page hooking `window.eval` reads that source verbatim.

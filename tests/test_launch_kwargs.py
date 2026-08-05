@@ -100,6 +100,35 @@ def test_humanize_rejects_a_boolean_word(data_dir: Path, monkeypatch: pytest.Mon
         _kwargs(data_dir, monkeypatch, CAMOUFOX_HUMANIZE="true")
 
 
+def test_camoufox_bundled_addons_stay_on_by_default(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """uBlock Origin ships in every launch unless someone asks for it to be left out.
+
+    It is real anti-detection and ad-blocking value for a user driving a real site, so
+    the marker suite's need for an empty browser must not become everyone's default.
+    """
+    monkeypatch.delenv("CAMOUFOX_BUNDLED_ADDONS", raising=False)
+    assert "exclude_addons" not in _kwargs(data_dir, monkeypatch)
+
+
+def test_camoufox_bundled_addons_can_be_left_out(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The setting excludes Camoufox's whole default set, not one named addon.
+
+    Camoufox's ``launch_options`` calls ``add_default_addons`` unconditionally, so
+    ``exclude_addons`` is the only lever; naming the set rather than a member keeps the
+    setting honest if upstream bundles a second addon.
+    """
+    from camoufox.addons import DefaultAddons
+
+    kwargs = _kwargs(data_dir, monkeypatch, CAMOUFOX_BUNDLED_ADDONS="false")
+
+    assert kwargs["exclude_addons"] == list(DefaultAddons)
+    assert DefaultAddons.UBO in kwargs["exclude_addons"]
+
+
 def test_browser_build_is_pinned_by_default(
     data_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

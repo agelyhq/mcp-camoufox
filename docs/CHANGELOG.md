@@ -6,37 +6,38 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.3.3] - 2026-08-05
+## [0.3.4] - 2026-08-06
 
-A release pipeline that runs the tests, a suite that no longer measures the machine, and a
-daemon that cleans up after itself.
+A release pipeline that runs the tests, a suite that no longer measures the machine, a daemon
+that cleans up after itself, and a network listing that stops losing the page's own first
+request.
 
-0.3.1 and 0.3.2 carry the same work and were both tagged, and neither reached PyPI: the new
-pipeline ran the suite and stopped each of them in turn, first on the daemon defect below,
-then on the marker test. That is what it is for, so both tags stay where they are, and this
-is the version you can install.
+0.3.1, 0.3.2 and 0.3.3 carry the same work and were all tagged, and none of them reached
+PyPI: the pipeline ran the entire suite each time and stopped, on the daemon defect, then the
+marker test, then the network rotation below. Each of those was a real defect that thousands
+of green runs on a workstation had never caught, so the 3 tags stay where they are as the
+record of what the gate is for, and this is the version you can install.
+
+### Added
+
+- `CAMOUFOX_BUNDLED_ADDONS`, `false` to launch without the extensions Camoufox ships. It
+  defaults to `true`, so nothing changes unless you set it. It exists because the marker test
+  needs a browser with no extension in it at all, and because until now there was no way to
+  ask for one: `CAMOUFOX_ADDON_URLS` only ever governed this project's own list.
 
 ### Changed
 
-- **The marker test says what it saw, and refuses to measure a page the parser has not
-  finished.** The 0.3.2 release run failed on it with
-  `['childList:', 'childList:', 'childList:']`: 3 mutations and nothing about whose they
-  were, which is unactionable for the one test that carries the project's central claim.
-  Every record now names its target (node name, id, class) and, for a child-list change,
-  the nodes added and removed. The probes also report the `readyState` they were armed at
-  and accept nothing but `complete`, because an unfinished parse appends the rest of the
-  page while they are recording and those appends are indistinguishable by count from a
-  leak of ours: arming on a page whose tail arrives late was measured producing exactly
-  that shape. Nothing was relaxed, the tally still has to be empty. The instrument moved
-  to `tests/probes.py` and the driver artifact it pins to
+- **The marker test says what it saw.** A release run failed on it with
+  `['childList:', 'childList:', 'childList:']`: 3 mutations, and nothing about whose they
+  were, which is unactionable for the one test carrying this project's central claim. Every
+  record now names its target (node name, id, class) and, for a child-list change, the nodes
+  added and removed. That alone named the culprit on the very next run, in 1 line, and it is
+  the second entry under Fixed. The probes also refuse any `readyState` but `complete`, since
+  an unfinished parse appends the rest of the page while they record and those appends cannot
+  be told from a leak of ours by count. That was not the cause here, but it was a second way
+  to be misled and it is closed. Nothing was relaxed, the tally still has to be empty. The
+  instrument moved to `tests/probes.py` and the driver artifact it pins to
   `tests/test_driver_footprint.py`, the module having outgrown 300 lines.
-- **Camoufox adds uBlock Origin to every launch, whatever `CAMOUFOX_ADDON_URLS` says.**
-  That variable sets this project's own addon list (by default a cookie blocker) and
-  cannot remove the browser's, since excluding it needs an argument nothing passes. It
-  was measured inserting nothing into a loopback page, so it is not what the release run
-  recorded, but the marker test claimed to run with no extension at all and now states
-  what is actually there. Documented in `configuration.md`.
-
 - **Publishing now runs the whole test suite first.** 0.3.0 was uploaded on the word that
   the suite passed locally: the workflow built and published without executing a single
   test. It is now build, then the entire suite against a real browser on the runner, then
@@ -65,6 +66,25 @@ is the version you can install.
 
 ### Fixed
 
+- **`list_network_requests` answered "No network requests captured." for a page whose request
+  it had already recorded and seen answered.** On the first navigation of a session, and only
+  there, because that navigation is what spawns the content process. The commit reaches us
+  from that process while the requests reach us from the browser's HTTP layer, 2 sources with
+  no order between them, so a page's load-time fetch could be recorded, answered 200, and
+  then retired wholesale by a commit arriving up to 380 ms later. The listing hides preserved
+  entries by default, and a page that fills its viewport issues no second fetch, so the answer
+  stayed empty for good. The network monitor now retires by entry id, keeping everything
+  recorded after the navigation's own document request, and prunes only what it retired, so a
+  request still in flight when a late commit lands still gets its status instead of reading
+  `pending` for ever. The interleaving is now a fixture rather than a race: a fake tab emits
+  the protocol events in the damaging order, and that test fails on the old code.
+- **The marker test counted uBlock Origin's DOM writes as ours.** It failed a release run with
+  3 `childList` records, which were uBO adding a `<script>` to `<head>`, removing it, and
+  removing its text node. The test's own docstring claimed the session ran with no browser
+  extension, which was false: Camoufox adds its addons on every launch and nothing could
+  opt out. The session now launches with none, proved by reading the profile's extension
+  records rather than by trusting a green test, and a second control proves that reading finds
+  uBO when it is left in.
 - **The daemon never withdrew its address advert, on any exit.** Not intermittently: the
   code that removed it had never run. Every exit the daemon has is a signal, since the idle
   watchdog and `/shutdown` both raise SIGTERM at themselves, and uvicorn answers a signal by
@@ -413,8 +433,8 @@ backed by Camoufox, with per-profile session isolation.
 
 - The S3 profile sync stack. Profiles are local-disk only.
 
-[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.3...HEAD
-[0.3.3]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.0...v0.3.3
+[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.0...v0.3.4
 [0.3.0]: https://github.com/agelyhq/mcp-camoufox/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/agelyhq/mcp-camoufox/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/agelyhq/mcp-camoufox/releases/tag/v0.1.1

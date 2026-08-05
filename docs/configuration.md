@@ -16,7 +16,8 @@ A copy of it lives in [.env.example](../.env.example).
 | `CAMOUFOX_VIEWPORT` | Camoufox default | Window size, for example `1280x720`. |
 | `CAMOUFOX_FINGERPRINT_OS` | random | `windows`, `linux` or `macos`. |
 | `CAMOUFOX_LOCALE` | Camoufox default | Browser locale, for example `en-US`. |
-| `CAMOUFOX_ADDON_URLS` | built-in defaults | Comma-separated list of addon URLs, replacing this project's defaults. Camoufox loads uBlock Origin into every browser it launches on its own, and no value here removes it. |
+| `CAMOUFOX_ADDON_URLS` | built-in defaults | Comma-separated list of addon URLs, replacing this project's defaults. Camoufox loads uBlock Origin into every browser it launches on its own, and no value here removes it: that is `CAMOUFOX_BUNDLED_ADDONS`. |
+| `CAMOUFOX_BUNDLED_ADDONS` | `true` | Set `false` to launch without the addons Camoufox bundles itself (uBlock Origin), which is the only way to remove them. Leave it on unless you need a browser holding nothing you did not put there. |
 | `CAMOUFOX_AUTO_UPDATE` | `true` | Set `false` to skip the startup browser and GeoIP update check. |
 | `CAMOUFOX_HUMANIZE` | off | Maximum cursor travel time in seconds, for example `1.5`. Read the warning below before enabling. |
 | `CAMOUFOX_BROWSER_VERSION` | the tested build | Pins the browser build, for example `152.0.4-beta.28`. Set it to `latest` to follow whatever upstream published last, which is how an install can change Firefox major version without any change on your side. |

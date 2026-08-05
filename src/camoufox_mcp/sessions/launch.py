@@ -11,6 +11,12 @@ if TYPE_CHECKING:
 
 IS_LINUX = sys.platform.startswith("linux")
 
+# Camoufox loads its own bundled addons (uBlock Origin, `camoufox.addons.DefaultAddons`)
+# into every browser it launches: `launch_options` calls `add_default_addons` unconditionally,
+# and the `addons` list this server passes is only appended to that. `exclude_addons` is the
+# single way out, which is why `CAMOUFOX_BUNDLED_ADDONS=false` exists: a browser holding an
+# extension writes to pages on its own, and the marker suite measures OUR footprint only.
+
 # Humanised cursor movement is opt-in (``CAMOUFOX_HUMANIZE``, off by default): with it
 # on, Firefox intermittently stops answering the Juggler protocol part-way through a
 # ``Page.dispatchMouseEvent`` while the process stays alive, so the pending click or
@@ -38,6 +44,9 @@ def build_launch_kwargs(
     otherwise). ``headless`` uses the per-session override when supplied, else the
     server-wide ``config.headless`` default. ``humanize`` is only sent when
     ``config.humanize`` is set, and ``browser`` only when a build is pinned.
+    ``exclude_addons`` is sent only when ``config.bundled_addons`` is off, and then
+    names every member of Camoufox's own default set rather than one addon, so the
+    setting keeps meaning "none of theirs" if that set ever grows.
 
     Never returns ``viewport`` or ``no_viewport``: Camoufox's ``AsyncNewBrowser``
     defaults a window-spoofing persistent context to ``no_viewport=True`` and only
@@ -78,6 +87,11 @@ def build_launch_kwargs(
         kwargs["window"] = (opts.viewport_width, opts.viewport_height)
     if addon_dirs:
         kwargs["addons"] = addon_dirs
+    if not config.bundled_addons:
+        # Imported here so camoufox stays out of this module's import, as in Session.create.
+        from camoufox.addons import DefaultAddons
+
+        kwargs["exclude_addons"] = list(DefaultAddons)
     if config.proxy:
         kwargs["proxy"] = config.proxy
     if config.geoip_forced:

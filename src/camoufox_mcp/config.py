@@ -92,6 +92,7 @@ class ServerConfig:
     camoufox_binary: str | None
     browser_version: str | None
     addon_urls: tuple[str, ...]
+    bundled_addons: bool
     auto_update: bool
     humanize: float | None
     session_defaults: SessionDefaults
@@ -164,6 +165,7 @@ class ServerConfig:
             camoufox_binary=os.getenv("CAMOUFOX_BINARY") or None,
             browser_version=_parse_browser_version(os.getenv("CAMOUFOX_BROWSER_VERSION")),
             addon_urls=_parse_addons(os.getenv("CAMOUFOX_ADDON_URLS")),
+            bundled_addons=(os.getenv("CAMOUFOX_BUNDLED_ADDONS", "true").lower() != "false"),
             auto_update=(os.getenv("CAMOUFOX_AUTO_UPDATE", "true").lower() != "false"),
             humanize=_parse_humanize(os.getenv("CAMOUFOX_HUMANIZE")),
             session_defaults=_parse_session_defaults(),

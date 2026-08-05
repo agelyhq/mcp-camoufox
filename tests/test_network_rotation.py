@@ -1,0 +1,129 @@
+"""What a tab's network listing holds across a navigation, per event interleaving.
+
+The monitors are fed by 2 sources the browser orders only within themselves: the
+document request and its sub-resources come from the browser's HTTP layer, the
+navigation commit from the content process hosting the new document. A cold session's
+first navigation spawns that process, so on a loaded machine the commit lands after the
+page's load-time fetch has already been captured. Measured on this stack: 5 of 6 cold
+navigations under CPU contention, the commit 50 to 380 ms after the fetch. On the
+release runner it emptied ``list_network_requests`` for ``/infinite-scroll``, a page
+whose fetch had already been answered 200.
+
+So the interleaving is the fixture here, emitted through :class:`tests.fakes.EventTab`
+rather than raced for in a browser: a test that has to win a race reports coverage it
+does not have. The real-browser half of the same rule, a SUB-frame navigation retiring
+nothing, is in ``test_subframe_navigation.py``.
+
+Every assertion is about the DEFAULT listing (``include_preserved`` off), because that
+is the one an agent calls, and a total of 0 is what the tool renders as "No network
+requests captured.".
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, cast
+
+from camoufox_mcp.sessions.page import Page
+from tests.fakes import EventTab
+
+if TYPE_CHECKING:
+    from camoufox_mcp.sessions import NetworkEntry
+
+DOC = "http://tab.test/infinite-scroll"
+FETCH = "http://tab.test/api/items?page=0"
+OTHER = "http://tab.test/other"
+
+
+def _tab() -> tuple[EventTab, Page]:
+    """A tab wired exactly as a session wires one: the Page builds the monitors."""
+    events = EventTab()
+    return events, Page(cast("Any", events))
+
+
+def _urls(entries: list[NetworkEntry]) -> list[str]:
+    return [entry.url for entry in entries]
+
+
+def _status(entries: list[NetworkEntry], url: str) -> int | None:
+    matched = [entry for entry in entries if entry.url == url]
+    assert len(matched) == 1, f"expected {url} listed once, got {_urls(entries)}"
+    return matched[0].status
+
+
+def test_a_late_navigation_commit_keeps_the_new_document_s_requests() -> None:
+    events, page = _tab()
+
+    document = events.request(DOC, "document")
+    events.respond(document)
+    fetch = events.request(FETCH, "fetch")
+    events.respond(fetch)
+    # The commit for that same document, announced only now.
+    events.navigated()
+
+    live, total = page.network.list_entries()
+    assert total == 1, _urls(live)
+    assert _urls(live) == [FETCH]
+    # Complete before it was retired, which is why the runner saw an EMPTY listing and
+    # not a "pending" entry: a slow request would still have been listed.
+    assert _status(live, FETCH) == 200
+    # The navigation's own document request is retired with the document it replaced,
+    # as it always has been: it was issued before this document existed.
+    both, _ = page.network.list_entries(include_preserved=True)
+    assert _urls(both) == [DOC, FETCH]
+
+
+def test_a_late_commit_still_completes_a_request_it_did_not_retire() -> None:
+    events, page = _tab()
+
+    document = events.request(DOC, "document")
+    events.respond(document)
+    fetch = events.request(FETCH, "fetch")
+    events.navigated()
+    # The answer arrives after the commit. Dropping the whole pending table on a
+    # rotation left this entry with nothing to complete, so it read "pending" for the
+    # rest of the session even though the browser had answered it.
+    events.respond(fetch, 204)
+
+    live, _ = page.network.list_entries()
+    assert _status(live, FETCH) == 204
+
+
+def test_a_navigation_retires_the_previous_document_s_requests() -> None:
+    events, page = _tab()
+
+    first = events.request(OTHER, "document")
+    events.respond(first)
+    events.navigated()
+    stale = events.request(f"{OTHER}/asset.js", "script")
+    events.respond(stale)
+
+    second = events.request(DOC, "document")
+    events.respond(second)
+    events.navigated()
+    fetch = events.request(FETCH, "fetch")
+    events.respond(fetch)
+
+    live, total = page.network.list_entries()
+    assert total == 1, _urls(live)
+    assert _urls(live) == [FETCH]
+    both, _ = page.network.list_entries(include_preserved=True)
+    assert f"{OTHER}/asset.js" in _urls(both)
+
+
+def test_a_navigation_carrying_no_document_request_retires_the_whole_ring() -> None:
+    events, page = _tab()
+
+    document = events.request(DOC, "document")
+    events.respond(document)
+    events.navigated()
+    fetch = events.request(FETCH, "fetch")
+    events.respond(fetch)
+
+    # about:blank, a data: URL or a same-document history move: nothing in the ring can
+    # belong to what the tab now shows.
+    events.navigated()
+
+    live, total = page.network.list_entries()
+    assert total == 0, _urls(live)
+    both, _ = page.network.list_entries(include_preserved=True)
+    assert _urls(both) == [DOC, FETCH]
