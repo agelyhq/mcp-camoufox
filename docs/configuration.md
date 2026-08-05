@@ -19,6 +19,7 @@ A copy of it lives in [.env.example](../.env.example).
 | `CAMOUFOX_ADDON_URLS` | built-in defaults | Comma-separated list of addon URLs, replacing the defaults. |
 | `CAMOUFOX_AUTO_UPDATE` | `true` | Set `false` to skip the startup browser and GeoIP update check. |
 | `CAMOUFOX_HUMANIZE` | off | Maximum cursor travel time in seconds, for example `1.5`. Read the warning below before enabling. |
+| `CAMOUFOX_BROWSER_VERSION` | the tested build | Pins the browser build, for example `152.0.4-beta.28`. Set it to `latest` to follow whatever upstream published last, which is how an install can change Firefox major version without any change on your side. |
 | `CAMOUFOX_BINARY` | Camoufox's own cache | Explicit path to a Camoufox executable. |
 | `CAMOUFOX_DAEMON` | `false` | `true` routes everything through a shared daemon. See [daemon.md](daemon.md). |
 | `CAMOUFOX_DAEMON_TTL` | `1800` | Daemon idle shutdown, in seconds. Only meaningful with the daemon on. |
@@ -36,21 +37,28 @@ detection tells that a windowed browser does not.
   rejected there rather than silently falling back.
 - **`true`**: genuine headless. Use it on Windows and macOS, in containers, and in CI.
 
-One caveat on `virtual`: Camoufox mutates the process-global `DISPLAY` when it starts
-Xvfb, so a single process cannot mix visible and virtual sessions. Pick one per
-process.
+Mixing modes in one process used to be a trap: Camoufox writes the throwaway Xvfb
+`DISPLAY` into the environment it was handed, and it defaults that to the live process
+environment, so a visible session started after a virtual one inherited a 1x1 display
+instead of the real desktop. Each launch now gets its own copy of the environment, so the
+modes no longer interfere and a test pins it.
 
 ## 🖱️ The humanised cursor
 
 `CAMOUFOX_HUMANIZE` enables Camoufox's human-like mouse movement, which is real
-anti-detection value. It is off by default because it intermittently wedges the
-browser: Firefox stops answering the Juggler protocol part-way through a mouse event
-while the process stays alive, so the pending click never returns and the caller hangs
-forever.
+anti-detection value. It is off by default because it can wedge the browser with no
+timeout and no way back.
 
-Every test run with it on froze at a random test. Every run without it passed. Enable
-it only if you need it and can tolerate that. The full reasoning is in
-[decisions.md](decisions.md).
+The mechanism: synthesised mouse events are serialised on a dispatch chain shared by the
+whole browser process, and each one waits for the renderer to acknowledge it. A missed
+acknowledgement never arrives, so the chain never advances and every later input event
+queues behind it forever. The 2 known triggers were fixed upstream in July 2026, and we
+still saw the freeze afterwards on a build carrying both fixes, so what is left is the
+residual class rather than the triggers. It has happened in real use, not only under test:
+1 click ran for 33 minutes.
+
+Enable it only if you want it and can tolerate a hang. The full reasoning, including the
+upstream tracking, is in [decisions.md](decisions.md).
 
 ## 🎛️ Per-session options
 
@@ -82,12 +90,18 @@ With `CAMOUFOX_DATA_DIR` unset, the base directory is the platform user data dir
 | macOS | `~/Library/Application Support/camoufox-mcp/` |
 | Windows | `%LOCALAPPDATA%\camoufox-mcp\` |
 
+That directory is `camoufox-mcp` while the package is `mcp-camoufox`, and the mismatch is
+deliberate. The package had to be renamed because `camoufox-mcp` belongs to someone else on
+PyPI. Renaming the directory too would have stranded every existing profile, and a profile
+is a login somebody signed into by hand, so it stayed where it is.
+
 Inside it:
 
 ```
 profiles/<profile>/   persistent browser context, one per profile name
 logs/<profile>.jsonl  telemetry, one line per tool call
 logs/_server.jsonl    server lifecycle records
+addons/               downloaded extension archives, shared by every profile
 daemon/               socket, lock and log, only when the daemon is on
 ```
 

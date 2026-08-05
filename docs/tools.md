@@ -14,8 +14,10 @@ Most work looks like this:
 
 1. `navigate` to a page. The session starts on the first call.
 2. `snapshot` to get the page structure with `eN` uids on interactive elements.
-3. Act with `click`, `fill`, `type_text` and friends, addressing elements by uid.
-4. Re-snapshot when the page changes. Navigation invalidates uids.
+3. Act with `click`, `fill`, `scroll` and friends, addressing elements by uid.
+4. Re-snapshot when the page changes to see what is new. A snapshot no longer invalidates
+   uids: an element still present keeps the uid it already had, and only navigation
+   renumbers.
 
 Steps 3 and 4 collapse into one call with `observe`, which appends the new page state
 to the action's result. That is one round trip instead of two.
@@ -34,8 +36,7 @@ to the action's result. That is one round trip instead of two.
 | `navigate` | `profile, url, [fingerprint_os, viewport_width, viewport_height, locale, block_images, block_webrtc, headless], observe?, timeout?` | Loads a URL, creating the session on the first call. The bracketed options apply only when the session is created, and are ignored with a note on an already-running profile. |
 | `reload` | `profile` | Reloads the current page. |
 | `go_back` | `profile` | Back in history. |
-| `go_forward` | `profile` | Forward in history. |
-| `wait_for` | `profile, condition, selector?, expression?, return_expression?, timeout?` | Waits for `load`, a CSS `selector`, `network_idle`, or a `predicate` (a JS `expression` re-evaluated each frame). `return_expression` runs once after a successful wait and its value is appended. |
+| `wait_for` | `profile, condition, selector?, expression?, return_expression?, timeout?, max_chars?` | Waits for `load`, a `selector`, `network_idle`, or a `predicate` (a JS `expression` polled every 50 ms). On expiry the error reports the last value the expression returned. `return_expression` runs once after a successful wait and its value is appended. |
 
 ## 📑 Tabs
 
@@ -50,14 +51,23 @@ to the action's result. That is one round trip instead of two.
 
 | Tool | Key parameters | What it does |
 |---|---|---|
-| `snapshot` | `profile, max_nodes?, interactive_only?` | The visible DOM as text, walked with ARIA-aware heuristics, with `eN` uids stamped on interactive elements. This is the main way to see a page. `max_nodes` defaults to 1500 and truncates with a note; `interactive_only` drops structural leaves. |
+| `snapshot` | `profile, max_nodes?, interactive_only?` | The visible DOM as text, walked with ARIA-aware heuristics, with an `eN` uid on every interactive element and a computed accessible name. This is the main way to see a page. `interactive_only` defaults to true; pass false for the full tree. `max_nodes` defaults to 1500 and truncates with a note. Nothing is written to the page. |
+| `find` | `profile, role?, name?, text?, label?, placeholder?, test_id?, css?, exact?, limit?` | Locates a few elements without capturing the whole tree, and mints uids `click`, `fill` and `get_element` accept straight away. Read-only: it never activates anything. When nothing matches it reports what it did see, naming up to 5 candidates, so a typo is fixable instead of a dead end. |
+| `get_element` | `profile, prop?, uid?, selector?, limit?, max_chars?, name?` | Reads one property of one element: `text`, `value`, `attribute` (needs `name`), `state`, `box`, `style` (needs `name`) or `count`. Returns the bare value, never a JSON wrapper. Exactly one of `uid` or `selector`, except `count`, which takes a selector. |
 | `screenshot` | `profile, full_page?, uid?, max_width?` | A PNG of the viewport, the full page, or one element's bounding box. `max_width` downscales and returns the coordinate multiplier alongside the image, which `click_at` needs. |
 | `get_html` | `profile, selector?, max_chars?, strip_scripts?, mode?` | Post-JavaScript markup or text. `selector` scopes to the first match. `mode='html'` (default, scripts stripped) or `'text'` for `innerText`. Capped at `max_chars`, default 20000, `<=0` for unlimited. |
 
-Screenshots are the most expensive thing you can ask for. A snapshot usually answers
-the same question for a fraction of the tokens. Keep the viewport small
-(`CAMOUFOX_VIEWPORT=1000x700` is a good default for local development) because image
-cost scales with pixel count.
+Screenshots are the most expensive thing you can ask for, and the usage data says they are
+reached for more than twice as often as a snapshot. A snapshot usually answers the same
+question for a fraction of the tokens, and `find` or `get_element` answer a narrower one
+for less again. Reach for the image when the question is genuinely visual: layout,
+rendering, a canvas. Keep the viewport small (`CAMOUFOX_VIEWPORT=1000x700` is a good
+default for local development) because image cost scales with pixel count.
+
+A value never comes back blank from `get_element`. A property that does not apply raises
+and names the tag, a real but empty value reads `(empty)`, an absent attribute reads
+`(not set)`, and a selector that matched several elements says so rather than hiding the
+ambiguity.
 
 ## 🖱️ Interaction
 
@@ -65,11 +75,8 @@ cost scales with pixel count.
 |---|---|---|
 | `click` | `profile, uid \| selector, double_click?, observe?` | Clicks an element. Pass exactly one of `uid` or a CSS `selector`. |
 | `click_at` | `profile, (x, y) \| points, double_click?, observe?` | Clicks raw viewport coordinates, for canvases and anything without a uid. `points: [[x,y], ...]` clicks a batch in order. |
-| `hover` | `profile, uid` | Hovers an element. |
-| `drag` | `profile, from_uid, to_uid` | Drags one element onto another. |
 | `fill` | `profile, uid \| selector, value, clear_first?, observe?` | Sets a field's value. On a `<select>` it picks the option matching by value, then by visible label. |
 | `fill_form` | `profile, fields` | Fills several fields at once: `fields = [{uid, value}, ...]`. |
-| `type_text` | `profile, text, submit?` | Types into whatever has focus, optionally pressing Enter afterwards. |
 | `press_key` | `profile, key` | Sends a key, for example `Enter` or `Control+A`. |
 | `scroll` | `profile, direction, amount?, uid?` | Scrolls the page, or scrolls an element into view. |
 | `upload_file` | `profile, uid, file_path` | Sets a file input's value. |
@@ -82,7 +89,13 @@ error rather than a silent preference.
 
 Use a uid when you found the element in a snapshot. Use a selector when you already
 know it (`selector="#email"`), which skips the snapshot entirely and is much cheaper.
-The selector path is Playwright-native and acts on the first match.
+The selector path is not a locator: the page is polled until the first match is visible, a
+uid is minted for it, and the identical uid path takes over, so both paths behave the same
+and neither marks the element. Supported syntax is plain CSS plus 2 extensions,
+`:has-text("...")` and `text=...`, resolved per comma branch and unioned in document order.
+Anything else raises an error naming what is supported rather than matching nothing. Engine
+prefixes are refused only at the start of a selector, so `[role="button"]` and
+`[data-testid="x"]` are ordinary CSS and work.
 
 ### observe
 
@@ -100,7 +113,7 @@ allowed to return an image.
 
 | Tool | Key parameters | What it does |
 |---|---|---|
-| `evaluate` | `profile, script` | Runs JavaScript in the page and returns the JSON-serialised result. |
+| `evaluate` | `profile, script, uids?, max_chars?, max_items?` | Runs JavaScript in the page and returns the JSON-serialised result. `uids` passes resolved elements into the script as arguments, so it does not have to re-find by selector something you already hold. Output is capped by default: `max_chars` on a string, `max_items` on an array, cut at the element boundary so the result still parses. |
 
 ## 🌐 Network
 
@@ -114,16 +127,6 @@ allowed to return an image.
 | Tool | Key parameters | What it does |
 |---|---|---|
 | `list_console_messages` | `profile, levels?, limit?, include_preserved?` | Recent console messages, optionally filtered by level. |
-
-## ⚡ Performance
-
-| Tool | Key parameters | What it does |
-|---|---|---|
-| `performance_summary` | `profile` | Navigation and Resource Timing summary: DNS, connect, TTFB, DOMContentLoaded, load, resource count, transfer size, and a breakdown by initiator type. |
-
-This is the standard W3C timing data, read from the page. It is not a Chrome
-performance trace and there is no Lighthouse audit here. See
-[decisions.md](decisions.md) for why those are out of scope rather than missing.
 
 ## ⚠️ Errors
 

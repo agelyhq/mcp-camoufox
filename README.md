@@ -37,7 +37,7 @@ coherent before any page script runs. Details in [docs/anti-bot.md](docs/anti-bo
 
 ```bash
 claude mcp add camoufox -e CAMOUFOX_HEADLESS=virtual -- \
-  uvx --from git+https://github.com/agelyhq/mcp-camoufox camoufox-mcp
+  uvx --from git+https://github.com/agelyhq/mcp-camoufox mcp-camoufox
 ```
 
 Or in any MCP client's config:
@@ -47,16 +47,20 @@ Or in any MCP client's config:
   "mcpServers": {
     "camoufox": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/agelyhq/mcp-camoufox", "camoufox-mcp"],
+      "args": ["--from", "git+https://github.com/agelyhq/mcp-camoufox", "mcp-camoufox"],
       "env": { "CAMOUFOX_HEADLESS": "virtual" }
     }
   }
 }
 ```
 
-Needs Python 3.12+ and [uv](https://docs.astral.sh/uv/). The browser downloads itself
-on first use. `virtual` runs a real windowed browser inside Xvfb, invisible to you and
-harder to detect than headless; it is Linux only, so use `true` on Windows and macOS.
+Once it is on PyPI that shortens to `uvx mcp-camoufox`, with no `--from`.
+
+Needs Python 3.12+ and [uv](https://docs.astral.sh/uv/). The first tool call downloads the
+Camoufox browser, which is a few hundred megabytes and takes a minute or two: it happens
+inside that call, so the first request looks slow and later ones are fast. `virtual` runs a
+real windowed browser inside Xvfb, invisible to you and harder to detect than headless; it
+is Linux only, so use `true` on Windows and macOS.
 
 Then just ask:
 
@@ -89,41 +93,47 @@ A second conversation asking for a profile that is already held gets a typed
 wastes an afternoon: one conversation navigating away while another is mid-form. See
 [docs/isolation.md](docs/isolation.md).
 
-**🪶 Tools that respect your context window.** `snapshot` walks the visible DOM with
-ARIA-aware heuristics (roles, `aria-label`, `<label for>`, focusability) and stamps
-`data-mcp-uid="eN"` on interactive elements, which every later tool addresses by uid.
-Output is capped at 1500 nodes with an explicit truncation note. `click`, `fill` and
-`navigate` take `observe`, which appends the resulting page state to the same call, so
-1 round trip instead of 2. Both accept a CSS selector directly, skipping the snapshot
-when you already know the element. Screenshots downscale on request and log their real
-token cost. Errors are 1 line, not a 40-line Playwright stack trace. 30 tools in total.
+**🫥 A uid that leaves no trace.** `snapshot` walks the visible DOM with ARIA-aware
+heuristics (roles, `aria-label`, `<label for>`, computed accessible names) and hands every
+interactive element an `eN` uid. That uid lives in a table inside the tab's own heap, never
+in the page: no attribute is written, no listener is added, no global appears. A uid names
+an **element**, not a position, so it survives a re-render and only navigation renumbers.
+Clicking checks first that the element is really the one under the cursor, so a cookie
+banner produces an error naming the banner instead of a success on the wrong thing.
+
+**🪶 Tools that respect your context window.** Snapshots cap at 1500 nodes, `evaluate`
+caps its own output, and both say what they truncated and how to see more. `click`, `fill`
+and `navigate` take `observe`, which appends the resulting page state to the same call, so
+1 round trip instead of 2. `find` locates an element by role, name or text without paying
+for a full snapshot, and `get_element` reads one property without writing JavaScript. Both
+`click` and `fill` also accept a selector directly: plain CSS, plus `:has-text("...")` and
+`text=...`. Screenshots downscale on request and log their real token cost. Errors are 1
+line, not a 40-line stack trace. 27 tools in total.
 
 **💻 Linux, Windows and macOS.** Including an opt-in shared daemon so several
 conversations can use 1 browser process, over a Unix socket on POSIX and a
 token-guarded loopback socket on Windows. See [docs/daemon.md](docs/daemon.md).
 
-## 📊 How it compares
+## 📊 What makes it different
 
-Verified by reading each project's source and issue tracker.
+3 things, and they are all in the browser rather than bolted on above it.
 
-| | mcp-camoufox | playwright-mcp | chrome-devtools-mcp | agent-browser |
-|---|---|---|---|---|
-| **Anti-detect** | the browser build itself, on by default | 1 Chromium launch flag | none in the repo | none locally, forwarded to paid cloud providers |
-| **Session identity** | a required `profile` argument on every call | derived from a hash of the working directory | 1 directory per Chrome channel | optional, defaults to `"default"` |
-| **2 conversations at once** | 2 named profiles, both persistent, 1 process | `--isolated` per client, which gives up persistence | `--isolated` per client | same browser unless each names a session |
-| **Persistent login** | yes, by name | yes | yes | opt-in |
-| **GeoIP-coherent locale and timezone** | yes, from the proxy exit IP | no | no | no |
-| **Humanised cursor** | optional, in the browser build | no | no | no |
+**The anti-detection is the build.** Camoufox patches Firefox at the C++ level, so the
+spoofing is not observable from JavaScript running in the page. Stealth added from
+JavaScript is itself a detectable patch, which is the whole reason this project starts
+from a different browser instead of a different script.
 
-Their maintainers describe the anti-detect gap themselves. chrome-devtools-mcp
-[#553](https://github.com/ChromeDevTools/chrome-devtools-mcp/issues/553), asking for
-stealth, has been open since November. On playwright-mcp
-[#58](https://github.com/microsoft/playwright-mcp/issues/58) the answer was "the web
-site you are automating properly detected the bot". agent-browser
-[#506](https://github.com/vercel-labs/agent-browser/issues/506), about Cloudflare, has
-no maintainer reply. It is not an oversight on their part: bolting stealth onto Chrome
-from JavaScript produces a detectable patch, which is why it has to be in the browser
-build.
+**This layer adds nothing on top.** Element identity lives in the tab's heap, not in the
+DOM. No attribute is written, no listener is added, no global appears, and no automation
+event is dispatched at any point. That is a contract, checked by
+`tests/test_no_markers.py` on every uid-consuming path, and its exact limit is written
+down in [docs/anti-bot.md](docs/anti-bot.md) rather than glossed over.
+
+**Isolation is mandatory, not a flag.** Every call names a `profile`. 2 names never
+share state, the same name is exclusive across OS processes, and both profiles stay
+persistent, so 2 conversations can work at once without either giving up its logins. The
+locale and timezone follow the proxy exit IP, so the browser's story about where it is
+holds together.
 
 ## 📚 Documentation
 

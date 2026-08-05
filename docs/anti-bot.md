@@ -72,7 +72,8 @@ type and scroll. From the Camoufox README: "Anti-bot systems also run client-sid
 scripts to monitor your behavior. This isn't perfect. It may still be detected." A
 humanised cursor exists (see `CAMOUFOX_HUMANIZE` in
 [configuration.md](configuration.md)) but it is best effort, and it is off by default
-for reasons documented in [decisions.md](decisions.md).
+because it can wedge the browser with no timeout and no recovery. The mechanism, and why
+the upstream fixes do not cover it, are in [decisions.md](decisions.md).
 
 **It does not change the TLS handshake.** Firefox's TLS stack is used unmodified, so
 JA3 and similar transport-level fingerprints identify it as Firefox. That is fine
@@ -86,6 +87,53 @@ that hard requires Chrome will not work here.
 **It does not protect your account.** Sites also score behaviour at the account level:
 volume, timing, and what you actually do. Passing the browser check is not permission
 to hammer an API through the UI.
+
+## 🫥 What this layer adds to the page: nothing
+
+Camoufox does the hard part, patching Firefox so nothing observable is injected. A server
+sitting on top of it can undo all of that in 1 line, so this one holds a contract:
+
+- No element carries an automation attribute, at any point. Element identity is a plain
+  object in the tab's own heap, held from the Python side through a single handle. Its
+  remote type is a plain object and never a DOM node, which is what keeps the driver's
+  injected script out of the page.
+- A `MutationObserver` watching `documentElement` for attributes, child lists and subtree
+  changes records nothing attributable to us.
+- No automation event is dispatched on any element, on any path.
+- No listener is added to `window`, no `MutationObserver` is constructed, and
+  `Object.getOwnPropertyNames(window)` and `getOwnPropertySymbols(window)` gain nothing.
+- Built-ins are captured when our code first runs and called through saved references, so
+  a page that replaces `Map`, `Event`, `DataTransfer`, `getSelection` or an iterator after
+  that point counts nothing.
+
+This is checked by `tests/test_no_markers.py` on every path that consumes a uid, and that
+test carries its own control: it deliberately triggers each of the 4 signals to prove its
+probes can see them. A probe that detects nothing because it is broken would otherwise pass
+forever.
+
+### The limits, stated rather than glossed over
+
+**A page that patches a built-in before our first script runs does see us.** Our JavaScript
+executes in the page's own realm, and there is no realm reachable from the client where it
+would not. A page hooking `window.eval` reads our source verbatim, which is why no file in
+that source names this project: what it reads looks like ordinary DOM code. The boot-time
+capture defeats patches installed after us, not before us.
+
+**Logging a DOM node to the console materialises the driver's injected script.** If page
+code runs `console.log(document.body)`, the driver builds a handle for the console
+argument in order to preview it, and that handle instantiates its injected script in the
+page's realm, which installs listeners a page can then read. This is a property of the
+driver, not of this server, and it happens whether or not anything subscribes to console
+messages. We could only avoid it by dropping console capture entirely, which would remove a
+capability with 302 real calls behind it. It is pinned by a test so that a future driver
+release closing the hole does not go unnoticed.
+
+**File uploads produce untrusted events.** Attaching a file without marking the target is
+only possible through a synthetic `DataTransfer`, so the resulting `input` and `change`
+events carry `isTrusted: false`. Every native path needs an element handle, which is the
+thing we refuse to create. A site gating uploads on `event.isTrusted` will reject us. This
+is the one realism regression in the design, it affects `upload_file` alone, and reversing
+it is a single call if that trade ever stops being worth it.
 
 ## 🎯 What this means in practice
 

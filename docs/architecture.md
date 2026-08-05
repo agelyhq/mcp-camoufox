@@ -10,12 +10,21 @@ src/camoufox_mcp/
   config.py            the only module that reads os.environ; frozen ServerConfig
   session_defaults.py  frozen dataclass of per-session creation options
   updater.py           throttled, non-blocking, fail-open auto-update
-  telemetry.py         per-profile JSONL logger
-  telemetry_intent.py  evaluate() intent buckets and script fingerprinting
-  sessions/            SessionManager, Session, launch kwargs, PageBook, Page, monitors
-  dom/                 uid snapshot system and the JS it injects
-  tools/               one file per tool, plus the @tool decorator and error rendering
-  daemon/              optional shared daemon: proxy, spawn, lifecycle, routes, endpoint
+  telemetry.py         per-profile JSONL logger (+ telemetry_intent.py for evaluate)
+  profile_name.py      the filename-safe rule, imported by both consumers of a name
+  deadlines.py         bounded(): the one way to await a Playwright call under a clock
+  sessions/            SessionManager, Session, launch kwargs, PageBook, Page, monitors,
+                       the log both monitors are built from, teardown, stdio silencing
+  dom/                 element identity: registry (the handle), identity, capture,
+                       actions, waiting (the poll), scripting, errors, source
+  dom/js/              numbered bundle concatenated in order: boot, visibility, names,
+                       walk, selector, query, geometry, actions, ops. Never names this
+                       project.
+  tools/               one file per tool, plus the @tool decorator, telemetry record,
+                       error rendering, observation, settled observation, page line,
+                       target resolution and text helpers
+  daemon/              optional shared daemon: proxy, spawn, lifecycle, routes, recovery,
+                       endpoint and socket path, identity, auth
 ```
 
 Dependencies point inward: `tools/` uses `sessions/` and `dom/`, which use `config.py`.
@@ -28,32 +37,81 @@ why it can be tested and reasoned about without a browser.
 `SessionManager` is the only owner of live sessions. Nothing launches at startup: the
 first tool call for a profile name takes a `filelock`, launches a persistent Camoufox
 context at `<data_dir>/profiles/<name>/`, and keeps it until `close_session` or process
-exit.
+exit. Launches are serialised per profile, never process-wide, so one cold multi-second
+start does not hold up the first call of every other client. Closing is bounded at every
+step: a tab that stops answering Juggler is abandoned rather than allowed to hang the
+shutdown behind it.
 
-`Page.raw` is the single escape hatch to Playwright. Hover, drag, keyboard,
-`set_input_files`, `select_option`, `wait_for_selector`, `goto` and history navigation
-go through it. Tools never touch Playwright any other way, and never return a raw
-Playwright object.
+The console and network monitors are one type twice. Both are a `PreservingLog`: a
+bounded ring of the current document's entries, a second ring holding what the previous
+document left behind, and a rotation driven by the tab's own navigations. Only the main
+frame counts as one, since a page whose ad or captcha iframe navigates has not itself gone
+anywhere, and treating that as a navigation used to empty the live ring under the agent.
+
+`Page.raw` is the single escape hatch to Playwright, and it is restricted to the surface
+verified to leave no trace in the page: `mouse`, `keyboard`, `screenshot`, `goto` and
+`wait_for_load_state`. Banned repo-wide: `locator()`, `query_selector`,
+`wait_for_selector`, `wait_for_function`, every `page.<action>(selector, ...)` form, and
+every `ElementHandle` action method.
+
+The ban has 2 independent reasons, both measured rather than assumed:
+
+- Every one of those calls dispatches `CustomEvent("__playwright_mark_target__")` onto the
+  target element before acting. It bubbles, it is composed, and any page catches it with a
+  single listener and no polling.
+- Creating an `ElementHandle` at all instantiates Playwright's injected script in the
+  page's own realm. Measured: 13 listeners appear on `window`, the first of them
+  `__playwright_global_listeners_check__`, plus 1 `MutationObserver`.
+
+Element actions therefore go through `page.elements`, and every screenshot passes
+`caret="initial"` so Playwright stops writing `caret-color: transparent` inline onto every
+field before capturing.
+
+Tools never touch Playwright any other way, and never return a raw Playwright object.
 
 ## 🏷️ The uid system
 
 `snapshot` walks the visible DOM with ARIA-aware heuristics (roles, `aria-label`,
-`<label for>`, focusability) and stamps `data-mcp-uid="eN"` on interactive elements.
-It is a DOM traversal, not the browser's own accessibility tree, and it covers the top
-document only, so iframes and shadow roots are out of reach today.
+`<label for>`, computed accessible names) and mints an `eN` uid for every interactive
+element. It is a DOM traversal, not the browser's own accessibility tree, and it covers
+the top document only, so iframes and shadow roots are out of reach today.
 
-Later calls address elements by that uid, resolved back through a
-`[data-mcp-uid="eN"]` selector.
+**Nothing is written to the page.** The uid table is a plain JavaScript object living in
+the tab's own heap, created once per document and reachable only through a single
+`JSHandle` held on the Python side. Its remote type is `object` and never `node`, which is
+precisely what keeps Playwright's injected script out of the page. It holds a map from uid
+to a `WeakRef`, with a `WeakMap` from element back to uid as the identity index, so
+nothing we do pins a removed node in memory.
 
-Uids are valid until the next navigation or snapshot. A stale one produces exactly:
+A uid therefore names an **element**, not a position. An element still present in the next
+capture keeps the uid it already had, whatever moved around it, and the counter only ever
+goes up so a retired number is never reissued. Because the table dies with its execution
+context, a cross-document navigation renumbers for free, while a same-document history
+change preserves every uid. That is the only renumbering, and it needs no navigation hook.
+
+The price is that uid numbers carry no document-order meaning: a capture can legitimately
+render `e0 e1 e57 e2`. Recovering ordering would mean renumbering, which is exactly the
+recycling bug this design exists to remove.
+
+A uid that no longer resolves produces exactly:
 
 ```
 Error: ValueError: unknown or stale uid 'e12'; take a new snapshot
 ```
 
-The stamp is a real DOM attribute rather than an in-memory map, which means it
-survives anything that keeps the element alive, and dies with the element. There is no
-cache to go quietly wrong.
+That covers an unknown or malformed uid, a detached element, a table rebuilt by
+navigation, and a dead execution context. A closed tab is a different thing and stays
+`TargetClosedError`: telling an agent to re-snapshot a browser that is gone would be an
+unbounded retry loop.
+
+Selectors are resolved by our own engine rather than Playwright's, for the same reason:
+plain CSS through the browser's native `querySelectorAll`, plus 2 extensions,
+`:has-text("...")` and `text=...`, which together covered every non-CSS selector in the
+measurement window. A selector list is resolved per comma branch and unioned in document
+order, so `.a, .b:has-text("x")` means what it reads as. Any other special syntax raises
+an error naming what is supported, rather than silently matching nothing. Note the engine
+prefixes are refused only at the start of a selector, so `[role="button"]` and
+`[data-testid="x"]` are ordinary CSS and work.
 
 ## 🧰 Tools
 
@@ -69,6 +127,13 @@ Tools never raise. The `@tool` wrapper converts every exception into a one-line
 `Error: <Type>: <message>`, stripping Playwright's call-log tail and folding newlines.
 A tool body is therefore pure happy path returning a string. It also emits the
 telemetry record, which is why no tool logs by hand.
+
+The wrapper binds the call's arguments once and does everything that depends on the
+tool's own name from there: the post-action observation an `observe` argument asked
+for, then the `[page]` line. A body that appended either would restate a name the
+wrapper already knows, which is how the two drift apart. A tool that needs more in its
+telemetry record declares it at registration (`@tool(mcp, deps, analytics=...)`)
+instead of the wrapper testing for it.
 
 ## 🔄 Startup and auto-update
 
