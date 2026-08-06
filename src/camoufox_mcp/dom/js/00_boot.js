@@ -8,17 +8,24 @@
 // Named, so the boundary is a fact rather than a promise: the Map/WeakMap/WeakRef/Set
 // table primitives and the map iterator, the query, geometry, style and scroll entry
 // points, the numeric helpers (parseInt, parseFloat, Math.min, Math.max), the promise
-// primitives the evaluate envelope is built from, the anchor pathname getter, and the
+// primitives the evaluate envelope is built from, the anchor pathname getter, the 7
+// accessors the markup read serialises a document with (querySelector,
+// documentElement, cloneNode, remove, outerHTML, innerText, textContent), and the
 // event, file, transfer, selection and range constructors the action ops use. No file
 // in this bundle uses `for...of` or an Array.prototype method, so no page-owned
 // iterator protocol is read either. tests/test_observability_boundary.py hooks a
-// sample of these after boot and asserts the page's own tally stays empty.
+// sample of these after boot and asserts the page's own tally stays empty, and
+// tests/test_get_html.py does the same for the markup read, where a replacement was
+// not merely visible: it decided what came back.
 //
 // What the capture does NOT cover, named just as plainly: the per-element accessors
 // every walk reads straight off each node (`getAttribute`, `tagName`, `value`,
 // `textContent`, `children`, `labels`, ...). They are not routed through B, so a page
-// that replaces one of them does count our reads. That is the boundary as it stands;
-// this comment states it rather than rounding it up to completeness.
+// that replaces one of them does count our reads. `textContent` is in both halves and
+// that is not a contradiction: the markup read calls the captured getter, the walk
+// reads the property off the node, and only the first of those is covered. That is the
+// boundary as it stands; this comment states it rather than rounding it up to
+// completeness.
 //
 // What NO capture can cover: a page that patches a built-in BEFORE our first evaluate.
 // Our JS runs in the page's own realm, and there is no realm reachable from the client
@@ -27,6 +34,18 @@
 // Nothing here is written to the document, to `window`, or as a symbol.
 const B = (() => {
   const w = window;
+  // One accessor, taken off the first prototype that owns it. `innerText` sits on
+  // HTMLElement in this engine and on Element in the current specification, and a
+  // descriptor read that came back undefined here would throw during boot and take
+  // EVERY operation down rather than the one read that wants it. Index loop, so no
+  // page-owned iterator is read while the table is still being built.
+  const getter = (protos, name) => {
+    for (let i = 0; i < protos.length; i++) {
+      const desc = w.Object.getOwnPropertyDescriptor(protos[i], name);
+      if (desc && desc.get) return desc.get;
+    }
+    return null;
+  };
   const mapProto = w.Map.prototype;
   // %MapIteratorPrototype%.next, reached without ever touching Symbol.iterator, so
   // walking our own table below needs no page-resolved iterator protocol.
@@ -47,6 +66,18 @@ const B = (() => {
     deref: w.WeakRef.prototype.deref,
     connected: w.Object.getOwnPropertyDescriptor(w.Node.prototype, 'isConnected').get,
     qsa: Document.prototype.querySelectorAll,
+    // The markup read (65_extract.js). These 7 were the last names in this bundle
+    // resolved on the page's own prototypes at call time, and the cost was not a
+    // count: with `NodeList.prototype.forEach` replaced by a no-op, the pass that
+    // drops <script> elements from the clone visited nothing and the caller got back
+    // the scripts it had asked to have removed. A wrong answer, silently.
+    qs: Document.prototype.querySelector,
+    docEl: getter([Document.prototype], 'documentElement'),
+    clone: Node.prototype.cloneNode,
+    drop: Element.prototype.remove,
+    outer: getter([Element.prototype], 'outerHTML'),
+    inner: getter([w.HTMLElement.prototype, Element.prototype], 'innerText'),
+    text: getter([Node.prototype], 'textContent'),
     eqsa: Element.prototype.querySelectorAll,
     efp: Document.prototype.elementsFromPoint,
     gbcr: Element.prototype.getBoundingClientRect,
