@@ -3,14 +3,49 @@ from __future__ import annotations
 from collections import deque
 from typing import TYPE_CHECKING
 
+from camoufox_mcp.sessions.errors import PLAYWRIGHT_ERROR
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from playwright.async_api import Frame, Page
+    from playwright.async_api import Frame, Page, Request
 
 # Entries held per ring, per tab. Both rings are bounded deques, so the oldest entry
 # is evicted on insertion and no caller ever has to trim them.
 MAX_ENTRIES = 1000
+
+
+def _is_main_frame(frame: Frame) -> bool:
+    """Whether ``frame`` is the frame carrying its own tab's document.
+
+    Identity, never URL: an embed showing the same address as its parent is still an
+    embed. The single place the comparison is written, because both event sources feeding
+    a monitor have to make it.
+    """
+    return frame is frame.page.main_frame
+
+
+def is_main_frame_request(request: Request) -> bool:
+    """Whether THIS TAB's main frame is what asked for ``request``.
+
+    The distinction :func:`on_main_frame_navigation` makes, on the other event source.
+    Firefox reports an embed's own document under the same ``document`` resource type as
+    the tab's, so resource type alone cannot tell a navigation of the tab from an ad slot
+    loading in the middle of the current document's life. Measured on the 152.0.4-beta.28
+    build: the tab's document request answers with the main frame, a declared iframe's and
+    a freshly injected iframe's both answer with a sub-frame.
+
+    Reading the frame off a request can raise instead of answering, and every case it
+    raises for is a no anyway, so the error is the answer: a service worker's request has
+    no frame at all, and Playwright reports a navigation request whose frame does not
+    exist yet the same way. The main frame is never either of those, since it exists for
+    as long as the tab does. Raising out of here would land in Playwright's event
+    dispatch, which stashes the exception and re-raises it on the next unrelated api call.
+    """
+    try:
+        return _is_main_frame(request.frame)
+    except PLAYWRIGHT_ERROR:
+        return False
 
 
 def on_main_frame_navigation(page: Page, handler: Callable[[], object]) -> None:
@@ -26,7 +61,7 @@ def on_main_frame_navigation(page: Page, handler: Callable[[], object]) -> None:
     """
 
     def dispatch(frame: Frame) -> None:
-        if frame is frame.page.main_frame:
+        if _is_main_frame(frame):
             handler()
 
     page.on("framenavigated", dispatch)

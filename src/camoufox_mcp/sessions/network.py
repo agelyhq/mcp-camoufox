@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from weakref import WeakKeyDictionary
 
-from camoufox_mcp.sessions.log import PreservingLog, on_main_frame_navigation
+from camoufox_mcp.sessions.log import (
+    PreservingLog,
+    is_main_frame_request,
+    on_main_frame_navigation,
+)
 
 if TYPE_CHECKING:
     from playwright.async_api import Page, Request, Response
@@ -63,8 +67,9 @@ class NetworkMonitor:
     def __init__(self) -> None:
         # Keyed by the Playwright Request object itself: identity is stable across the
         # request/response/requestfailed events, so the correct entry is always mutated.
-        # Pruned by _rotate down to the entries a navigation retired: those can no longer
-        # be completed, and holding their keys would leak the request objects.
+        # _rotate drops the entries a navigation RETIRED and keeps every other one: a
+        # retired entry can no longer be completed and holding its key would leak the
+        # request object, while an entry still live has an answer coming.
         self._pending: dict[Request, NetworkEntry] = {}
         # Response objects live here, not on the DTO. Weak keys drop the response as
         # soon as its entry is evicted from the rings and garbage-collected.
@@ -74,8 +79,8 @@ class NetworkMonitor:
         # copy and re-filter the whole ring on every poll tick. Never reset: ids only
         # grow, so the newest document request stays the highest across a rotation.
         self._last_document_reqid = -1
-        # The rotation boundary, and the reason it is the FIRST document request since
-        # the last rotation rather than the last one: see _rotate.
+        # The rotation boundary, and the reason it is the FIRST main-frame document
+        # request since the last rotation rather than the last one: see _rotate.
         self._first_document_since_rotation: int | None = None
 
     def attach(self, page: Page) -> None:
@@ -102,17 +107,24 @@ class NetworkMonitor:
 
         Entry ids are the evidence the ring carries about documents: everything
         recorded AFTER a navigation's own document request was asked for by the
-        document that request delivered. The FIRST document request since the last
-        rotation is the boundary, not the latest: on a page whose sub-frames navigate
-        while the commit is in flight, the latest would place the boundary past the
-        main document's own sub-resources and retire exactly what this method exists
-        to keep. Erring the other way leaves 1 stale entry visible, which costs a
-        caller nothing.
+        document that request delivered. Only the tab's MAIN-FRAME document requests
+        count as one (``is_main_frame_request``): an embed's document is announced
+        under the same resource type, and taking the boundary from one put it inside
+        the current document's life, so the next commit retired up to the ad slot and
+        left everything the replaced document asked for after it live.
 
-        No document request since the last rotation means this navigation has none of
-        its own (about:blank, a data: URL, a same-document history move), and then
-        nothing in the ring can belong to the new document: the whole ring is retired,
-        as it always has been.
+        The FIRST such request since the last rotation is the boundary, not the latest,
+        because 2 of them can be outstanding when a commit lands: a redirect chain
+        announces one request per hop, and a second navigation started before the first
+        committed adds its own. The commit that lands belongs to 1 of them, and taking
+        the latest would retire a document request whose own commit is still to come
+        along with everything recorded after it. Erring the other way leaves a stale
+        entry or 2 visible, which costs a caller nothing.
+
+        No main-frame document request since the last rotation means this navigation
+        has none of its own (about:blank, a data: URL, a same-document history move),
+        and then nothing in the ring can belong to the new document: the whole ring is
+        retired, as it always has been.
         """
         boundary = self._first_document_since_rotation
         self._first_document_since_rotation = None
@@ -136,7 +148,9 @@ class NetworkMonitor:
         )
         self._log.record(entry)
         self._pending[request] = entry
-        if entry.resource_type == "document":
+        # Both marks are about the TAB's document, so an embed's document request is
+        # neither a rotation boundary nor evidence that the tab is navigating.
+        if entry.resource_type == "document" and is_main_frame_request(request):
             self._last_document_reqid = entry.reqid
             if self._first_document_since_rotation is None:
                 self._first_document_since_rotation = entry.reqid
@@ -157,10 +171,12 @@ class NetworkMonitor:
 
     @property
     def last_document_reqid(self) -> int:
-        """Id of the most recent document request, or -1 when the tab issued none.
+        """Id of the tab's most recent document request, or -1 when it issued none.
 
-        A document request is the earliest reliable evidence that a navigation has
-        started, and this answers in O(1) so it can be polled every few milliseconds.
+        A main-frame document request is the earliest reliable evidence that a
+        navigation has started, and this answers in O(1) so it can be polled every few
+        milliseconds. An embed's document is excluded on purpose: it is what the
+        settling wait in ``tools/_page_line.py`` would otherwise read as the tab moving.
         """
         return self._last_document_reqid
 
