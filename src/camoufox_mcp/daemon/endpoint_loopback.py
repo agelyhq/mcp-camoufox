@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
-import os
 import secrets
 import socket
 from typing import TYPE_CHECKING, Any
@@ -15,7 +14,13 @@ from starlette.middleware import Middleware
 
 from camoufox_mcp.daemon import paths
 from camoufox_mcp.daemon.auth import TokenAuthMiddleware
-from camoufox_mcp.daemon.endpoint import DEFAULT_MCP_TIMEOUT, Bound, Conn, DaemonEndpoint
+from camoufox_mcp.daemon.endpoint import (
+    DEFAULT_MCP_TIMEOUT,
+    Bound,
+    Conn,
+    DaemonEndpoint,
+    publish_advert,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -45,13 +50,11 @@ class LoopbackEndpoint(DaemonEndpoint):
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
         token = secrets.token_urlsafe(32)
-        _write_endpoint_file(
-            paths.endpoint_path(config), {"host": "127.0.0.1", "port": port, "token": token}
-        )
+        advert = {"host": "127.0.0.1", "port": port, "token": token}
+        publish_advert(paths.endpoint_path(config), json.dumps(advert))
         return Bound(
             run_kwargs={"sockets": [sock]},
             middleware=[Middleware(TokenAuthMiddleware, token=token)],
-            token=token,
             advert_id=self.advert_id(config),
             _socket=sock,
         )
@@ -87,18 +90,19 @@ class LoopbackEndpoint(DaemonEndpoint):
 
 
 def _read_endpoint_file(path: Path) -> dict[str, Any] | None:
+    """The advert on disk, or ``None`` when there is nothing usable there.
+
+    A corrupt advert is treated exactly like an unreadable one, and the type check is
+    part of that: valid JSON that is not an object (``null``, ``3``, ``"x"``) answers
+    ``key in data`` with a ``TypeError`` or, for a string, with a substring match, so
+    without it both :meth:`LoopbackEndpoint.resolve` and
+    :meth:`LoopbackEndpoint.advert_id` raise on a truncated or hand-edited file instead
+    of reporting no daemon.
+    """
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not all(key in data for key in ("host", "port", "token")):
+    if not isinstance(data, dict) or not all(key in data for key in ("host", "port", "token")):
         return None
     return data
-
-
-def _write_endpoint_file(path: Path, data: dict[str, Any]) -> None:
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data), encoding="utf-8")
-    with contextlib.suppress(OSError):
-        tmp.chmod(0o600)
-    os.replace(tmp, path)

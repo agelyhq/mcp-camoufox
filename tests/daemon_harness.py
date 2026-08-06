@@ -21,6 +21,7 @@ import httpx
 from camoufox_mcp.config import ServerConfig
 from camoufox_mcp.daemon import paths
 from camoufox_mcp.daemon.endpoint import select_endpoint
+from camoufox_mcp.daemon.endpoint_unix import HARDEN_DEADLINE_S
 from camoufox_mcp.daemon.identity import DaemonIdentity
 from camoufox_mcp.daemon.socket_path import address_pointer_path, published_socket_path
 from camoufox_mcp.daemon.spawn import log_tail, probe_health
@@ -260,9 +261,13 @@ def assert_hardened(cfg: ServerConfig) -> None:
         with httpx.Client(base_url=conn.base_url, timeout=2.0) as raw:
             assert raw.get("/health").status_code == 401
         return
-    # The daemon tightens uvicorn's default 0o666 socket mode shortly after bind.
+    # The daemon tightens uvicorn's default 0o666 socket mode shortly after bind. The wait
+    # is the daemon's own budget, imported rather than copied: a smaller number here fails a
+    # daemon still inside its contract, which under load reads as a defect that is not one.
     socket_path = published_socket_path(cfg)
     poll_until_sync(
-        lambda: (socket_path.stat().st_mode & 0o777) == 0o600, deadline=2.0, interval=0.05
+        lambda: (socket_path.stat().st_mode & 0o777) == 0o600,
+        deadline=HARDEN_DEADLINE_S,
+        interval=0.05,
     )
     assert (socket_path.stat().st_mode & 0o777) == 0o600

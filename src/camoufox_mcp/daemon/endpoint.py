@@ -4,10 +4,15 @@ Each platform serves the daemon's private HTTP on a different kind of address, a
 2 strategies live in :mod:`camoufox_mcp.daemon.endpoint_unix` and
 :mod:`camoufox_mcp.daemon.endpoint_loopback`. Everything else in the daemon depends on
 the abstraction here and receives a strategy as an argument.
+
+The 1 write both strategies make, :func:`publish_advert`, lives here rather than in
+either of them: what it does to a control channel's address on disk is a security
+property, and 2 copies of a security property drift.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -18,6 +23,7 @@ import httpx
 if TYPE_CHECKING:
     import socket
     from collections.abc import Callable
+    from pathlib import Path
 
     from starlette.middleware import Middleware
 
@@ -27,6 +33,30 @@ IS_WINDOWS = os.name == "nt"
 
 _MCP_PATH = "/mcp"
 DEFAULT_MCP_TIMEOUT = httpx.Timeout(30.0, read=300.0)
+
+
+def publish_advert(path: Path, text: str) -> None:
+    """Write an advert naming a running daemon's address: atomically, owner-only.
+
+    The 1 write both strategies make. The POSIX address pointer and the Windows endpoint
+    file are the same kind of object, a control channel's address on disk, and 0o600 on it
+    is a security property rather than tidiness, so it is set in 1 place instead of 2 that
+    can drift apart.
+
+    Both halves of the sequence are load-bearing. The temporary file plus
+    :func:`os.replace` means a reader never sees a half-written address, and it also makes
+    every publication land as a DISTINCT inode: that inode is the proof a daemon takes at
+    ``bind`` that the advert it withdraws on the way out is still its own and not one a
+    later daemon wrote at the same address. Unlinking another daemon's advert leaves it
+    running with no control channel and its browsers unreachable. The mode is set before
+    the rename, so the file is never reachable at a wider one, and a platform that refuses
+    the ``chmod`` (Windows, where the bearer token is the real boundary) still publishes.
+    """
+    tmp = path.with_name(f"{path.name}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    with contextlib.suppress(OSError):
+        tmp.chmod(0o600)
+    os.replace(tmp, path)
 
 
 @dataclass(frozen=True)
@@ -44,11 +74,13 @@ class Conn:
 
 @dataclass
 class Bound:
-    """What the daemon must feed ``run_http_async`` to serve, plus its control token.
+    """What the daemon must feed ``run_http_async`` to serve, and what it proved binding.
 
     ``run_kwargs`` are spread into ``run_http_async`` (a ``uvicorn_config`` with a
     ``uds`` on POSIX, a pre-bound ``sockets`` list on Windows). ``_socket`` is held
-    only to keep the pre-bound socket alive until uvicorn adopts it.
+    only to keep the pre-bound socket alive until uvicorn adopts it. A control token,
+    where the platform needs one, travels in ``middleware`` and nowhere else: the daemon
+    enforces it, never reads it.
 
     ``advert_id`` is the identity of the advert this bind published, read back the
     instant it was written: the daemon's proof, in hand before it serves a single
@@ -57,7 +89,6 @@ class Bound:
 
     run_kwargs: dict[str, Any]
     middleware: list[Middleware] = field(default_factory=list)
-    token: str | None = None
     advert_id: str | None = None
     _socket: socket.socket | None = None
 

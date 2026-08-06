@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 from camoufox_mcp.config import ensure_private_dir
 from camoufox_mcp.daemon import paths
+from camoufox_mcp.daemon.endpoint import publish_advert
 from camoufox_mcp.daemon.errors import SocketPathTooLongError
 
 if TYPE_CHECKING:
@@ -61,17 +62,12 @@ def address_pointer_path(config: ServerConfig) -> Path:
 def publish_socket_path(config: ServerConfig, path: Path) -> None:
     """Record, in the data dir, the address this daemon just bound.
 
-    Written through a temporary file and :func:`os.replace`, so a reader never sees a
-    half-written address and every publication lands as a distinct inode: that inode is
-    what identifies the publication to the daemon that made it.
+    Goes through :func:`camoufox_mcp.daemon.endpoint.publish_advert`, the 1 write both
+    control-channel strategies make, where the atomicity, the 0o600 and the inode that
+    identifies this publication to the daemon that made it are explained.
     """
     paths.ensure_daemon_dir(config)
-    target = address_pointer_path(config)
-    tmp = target.with_name(f"{_ADDRESS_FILE}.tmp")
-    tmp.write_text(str(path), encoding="utf-8")
-    with contextlib.suppress(OSError):
-        tmp.chmod(0o600)
-    os.replace(tmp, target)
+    publish_advert(address_pointer_path(config), str(path))
 
 
 def unpublish_socket_path(config: ServerConfig) -> None:
