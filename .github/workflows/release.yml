@@ -9,9 +9,10 @@ name: Release
 #
 # 1. build   builds the wheel and the sdist, and refuses on bad metadata or on a tag that
 #            disagrees with the version inside it.
-# 2. verify  runs the entire E2E suite against a real browser, on the artifact's own tree.
-#            Lint is deliberately not here: it runs locally before a release, and failing a
-#            20 minute pipeline on formatting buys nothing.
+# 2. verify  runs the entire E2E suite against a real browser, on the artifact's own tree, on
+#            every Python version `requires-python` accepts. Lint is deliberately not here: it
+#            runs locally before a release, and failing a 20 minute pipeline on formatting buys
+#            nothing.
 # 3. publish uploads, gated by the "pypi" environment, which requires a manual approval.
 #
 # Each job needs the one before it, so a red suite cannot be published past. Authentication
@@ -95,17 +96,25 @@ jobs:
           path: dist/
 
   verify:
-    name: Full E2E suite
+    name: Full E2E suite (Python ${{ matrix.python }})
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      # Both versions `requires-python` accepts. A 3.13 asyncio behaviour once satisfied an
+      # assertion our own code owed, so a cleanup path that had never run on any exit looked
+      # correct for as long as only 1 interpreter was ever checked. fail-fast is off because
+      # the point is learning about both, not stopping at the first.
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
 
       - run: uv sync --extra dev
 
@@ -115,7 +124,9 @@ jobs:
       - name: Install Xvfb
         run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
 
-      # About 500 MB, and it changes only when the pin moves, so key the cache on the pin.
+      # About 500 MB, and it changes only when the pin moves, so key the cache on the pin. The
+      # key carries no Python version on purpose: the browser is a native binary, identical
+      # for both matrix legs, so they share 1 entry instead of storing it twice.
       - name: Cache the browser
         uses: actions/cache@v4
         with:
