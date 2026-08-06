@@ -158,3 +158,23 @@ async def test_click_at_neither_single_nor_points_errors(client: Client, flask_s
     result = tool_text(await client.call_tool("click_at", {"profile": PROFILE}))
     assert "error" in result.lower()
     assert "provide exactly one" in result.lower()
+
+
+async def test_click_at_empty_points_is_rejected_not_reported_as_clicked(
+    client: Client, flask_server: str
+) -> None:
+    """An empty batch used to be a valid batch, so the tool reported 0 clicks as done.
+
+    ``[]`` is not ``None``, so the "exactly one of" test accepted it, and the loop that
+    followed had nothing to iterate: ``Clicked 0 points at`` came back from a call that
+    touched nothing. Worse than an error, because the caller cannot tell it apart from a
+    click that landed, which is why the page's own counter is the closing assertion here
+    and not the returned string.
+    """
+    await open_page(client, f"{flask_server}/click-at")
+    json.loads(await evaluate(client, PROFILE, RECT_AND_COUNTER_JS))
+
+    result = tool_text(await client.call_tool("click_at", {"profile": PROFILE, "points": []}))
+
+    assert result == "Error: ValueError: provide exactly one of (x and y) or points", result
+    assert (await evaluate(client, PROFILE, "window.__clicks")).strip() == "0"

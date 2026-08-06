@@ -10,6 +10,12 @@ if TYPE_CHECKING:
 
 SCROLL_Y_JS = "Math.round(window.scrollY)"
 
+# The rendered rejection, spelled once: 3 scenarios assert it, and 3 copies of a string
+# this exact would let a reworded message pass 2 of them.
+INVALID_DIRECTION = (
+    "Error: ValueError: invalid direction 'sideways'; valid values: 'down', 'up', 'left', 'right'"
+)
+
 
 def _in_viewport_js(selector: str) -> str:
     """A predicate that is true when the element sits fully inside the viewport.
@@ -98,7 +104,45 @@ async def test_scroll_invalid_direction(client: Client, flask_server: str) -> No
     result = tool_text(
         await client.call_tool("scroll", {"profile": PROFILE, "direction": "sideways"})
     )
-    assert result == (
-        "Error: ValueError: invalid direction 'sideways'; valid values: "
-        "'down', 'up', 'left', 'right'"
-    ), result
+    assert result == INVALID_DIRECTION, result
+
+
+async def test_scroll_rejects_a_bad_direction_before_it_launches_a_browser(
+    client: Client, flask_server: str
+) -> None:
+    """The closed set is checked at the top of the body, before the side effect.
+
+    Checked after ``get_session`` instead, a typo cost a whole browser launch and its
+    on-disk profile before the answer came back, and the profile then stayed live for the
+    rest of the conversation. So this asserts the rejection AND that no session exists
+    afterwards: the message alone was already correct, the launch is the defect.
+
+    Nothing navigates first, on purpose. ``flask_server`` is only here because the
+    ``client`` fixture depends on it.
+    """
+    result = tool_text(
+        await client.call_tool("scroll", {"profile": PROFILE, "direction": "sideways"})
+    )
+
+    assert result == INVALID_DIRECTION, result
+    assert tool_text(await client.call_tool("list_sessions", {})) == "No active sessions."
+
+
+async def test_scroll_rejects_a_bad_direction_on_the_uid_branch_too(
+    client: Client, flask_server: str
+) -> None:
+    """``direction`` is ignored with a uid, which is not the same as unvalidated.
+
+    The uid branch returned before the check was ever reached, so ``direction="sideways"``
+    was accepted there and the caller was told nothing about a word the tool does not
+    know. An argument silently ignored on one path and rejected on the other is 2
+    contracts for 1 parameter.
+    """
+    snap = await open_and_snapshot(client, f"{flask_server}/scroll")
+    uid = extract_uid(snap, "Index")
+
+    result = tool_text(
+        await client.call_tool("scroll", {"profile": PROFILE, "uid": uid, "direction": "sideways"})
+    )
+
+    assert result == INVALID_DIRECTION, result
