@@ -161,3 +161,25 @@ find it where it left it.
 
 The daemon has its own idle TTL, but it only fires at zero active sessions and zero
 in-flight requests, so it never kills a live browser to hit a timeout.
+
+## uBlock Origin stays on
+
+Camoufox adds its own addons to every browser it launches, uBlock Origin among them, and
+0.3.4 added `CAMOUFOX_BUNDLED_ADDONS=false` for anyone who wants a browser without them.
+The default stays `true`.
+
+It is a real trade, so here is the losing side stated fairly. uBO writes to the page: it
+inserts a `<script>` into `<head>` and removes it again, which is DOM activity we neither
+version nor control. A blocked request is also an observable difference, and a site
+expecting its own analytics call sees it missing. We do not own its filter lists or its
+update cadence, yet its behaviour lands inside our anti-detection claim.
+
+We keep it anyway. It is what Camoufox ships and what its fingerprinting work was tuned
+against, so removing it makes this project the odd one out rather than the safe one. It
+cuts a large amount of ad and tracker traffic out of `list_network_requests`, which is
+noise an agent pays for in tokens on every listing. And blocking is now so common that its
+absence is at least as remarkable as its presence.
+
+The lever exists for the case where a specific site disagrees. The marker test uses it,
+because measuring our own footprint requires a page with nobody else writing to it: uBO's
+3 mutation records were credited to us and blocked a release before that was understood.

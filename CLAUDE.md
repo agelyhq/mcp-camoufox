@@ -130,9 +130,9 @@ differentiators, credits), never grows a reference section, and names no other p
 local Flask, offline), `make run`. The only CI is `.github/workflows/release.yml`: a version
 tag builds, refuses a tag disagreeing with the built version, runs the WHOLE suite on the
 runner, then publishes through OIDC behind a manual approval. Lint is not in it, it runs
-here. That runner is **Python 3.12** and this box 3.13, so verify a release under
-`uv run --python 3.12`: a 3.13 stdlib behaviour once satisfied an assertion our own code
-owed, and the defect shipped. **No test may wait a duration before asserting**: wait for the
+here. The runner covers **3.12 and 3.13**, both `requires-python` accepts, because a 3.13
+stdlib behaviour once satisfied an assertion our own code owed; `make test-oldest` runs 3.12
+locally. **No test may wait a duration before asserting**: wait for the
 appearance, deadline as guardrail, via `tests/waits.py:poll_until`. Shared test code lives
 only in `tests/`; `tools/list` is budgeted in `tests/payload_baseline.json`.
 
