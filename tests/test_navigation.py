@@ -14,6 +14,10 @@ if TYPE_CHECKING:
     import pytest
     from fastmcp import Client
 
+# Text the /snapshot page carries in its definition list and nowhere in its title, so
+# no tool's own success line can supply it: only the captured body can.
+BODY_ONLY_PHRASE = "Model Context Protocol"
+
 
 async def test_back_and_reload(client: Client, flask_server: str) -> None:
     """Going back moves the tab, so it reports the page; reloading stays put.
@@ -63,6 +67,14 @@ async def test_navigate_observe_snapshot(client: Client, flask_server: str) -> N
 
 
 async def test_navigate_observe_text(client: Client, flask_server: str) -> None:
+    """The text observation carries the page body, and is asserted on the body alone.
+
+    ``navigate`` already answers "Navigated to: Snapshot Test (<url>)", so a needle
+    taken from the page TITLE and looked for in the whole result was supplied by the
+    action's own success line: an empty observation, or one carrying somebody else's
+    page, passed. The verdict is now a phrase from deep inside the body (a definition
+    list entry), read from the block after the observation header.
+    """
     result = tool_text(
         await client.call_tool(
             "navigate",
@@ -71,7 +83,8 @@ async def test_navigate_observe_text(client: Client, flask_server: str) -> None:
     )
     assert "Navigated to" in result
     assert OBSERVATION_TEXT_MARK in result
-    assert "Snapshot Test" in result  # page body innerText
+    _, _, block = result.partition(OBSERVATION_TEXT_MARK)
+    assert BODY_ONLY_PHRASE in block, block
 
 
 async def test_navigate_observe_invalid(client: Client, flask_server: str) -> None:

@@ -38,6 +38,18 @@ OS_EXPECTATIONS: list[tuple[str, str]] = [
     ("macos", "macOS"),
 ]
 
+# What each OS must put in ``navigator.userAgent`` and ``navigator.platform``, and by
+# omission what it must NOT: the other 2 rows' tokens have to be absent from both. The
+# page's ``detectedOS`` is a weighted vote (fonts 3, platform 2, webgl 2, hints 2, UA 2,
+# worker 1), so a userAgent still naming the host is outvoted by the rest of the spoof
+# and leaves line 1 of the assertions green. A value naming 2 systems at once is the
+# same defect seen from the other side, and is what the absences below are for.
+OS_TOKENS: dict[str, tuple[str, str]] = {
+    "windows": ("Windows NT", "Win"),
+    "linux": ("Linux", "Linux"),
+    "macos": ("Mac OS X", "Mac"),
+}
+
 
 async def _run_fingerprint(client: Client, url: str, target_os: str, profile: str) -> dict:
     """Navigate to the fingerprint page, wait for FP_READY, extract results."""
@@ -57,7 +69,15 @@ async def test_os_fingerprint(
     target_os: str,
     expected_os: str,
 ) -> None:
-    """Fingerprint page must detect the expected OS for each fingerprint_os."""
+    """The page detects the requested OS, and the 2 values it can read name only that OS.
+
+    The 2 assertions this replaced ("userAgent must not be empty", same for platform)
+    could not fail: no Firefox build has an empty ``navigator.userAgent``, and an empty
+    one would have failed the ``detectedOS`` comparison above it first, since the page
+    votes on it. What is worth asserting is that each of those 2 values names the
+    requested system ON ITS OWN, which the vote does not require, and that neither
+    leaks one of the other 2 systems.
+    """
     data = await _run_fingerprint(
         client, f"{flask_server}/fingerprint", target_os, f"fp_{target_os}"
     )
@@ -65,8 +85,16 @@ async def test_os_fingerprint(
     assert data["detectedOS"] == expected_os, (
         f"Expected {expected_os!r} but detected {data['detectedOS']!r}"
     )
-    assert data["userAgent"], "userAgent must not be empty"
-    assert data["platform"], "platform must not be empty"
+    _assert_names_only(data["userAgent"], target_os, index=0, subject="userAgent")
+    _assert_names_only(data["platform"], target_os, index=1, subject="platform")
+
+
+def _assert_names_only(value: str, target_os: str, *, index: int, subject: str) -> None:
+    """``value`` carries ``target_os``'s token at ``index`` and no other OS's token."""
+    assert OS_TOKENS[target_os][index] in value, f"{subject} {value!r} does not name {target_os}"
+    for other, tokens in OS_TOKENS.items():
+        if other != target_os:
+            assert tokens[index] not in value, f"{subject} {value!r} also names {other}"
 
 
 async def test_os_fingerprints_differ(client: Client, flask_server: str) -> None:

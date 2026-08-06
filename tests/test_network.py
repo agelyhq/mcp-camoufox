@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.helpers import PROFILE, goto_and_find, tool_text
+from tests.helpers import PROFILE, goto_and_find, line_with, tool_text
 from tests.waits import completed_entry, poll_tool_or_last, reqid_for
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from fastmcp import Client
+
+# The resource-type field of a rendered entry: "[0] GET 200 document http://...". The
+# surrounding spaces keep it off the URL, which is the only other free-form field.
+_DOCUMENT_FIELD = " document "
 
 
 def _completed(url_fragment: str) -> Callable[[str], bool]:
@@ -63,17 +67,37 @@ async def test_get_network_request_unknown_id(client: Client, flask_server: str)
 
 
 async def test_list_network_requests_filter(client: Client, flask_server: str) -> None:
+    """The resource-type filter must EXCLUDE what it does not name, not merely keep what it does.
+
+    ``/api/echo`` IS a fetch, so "the fetch is listed" holds whether the filter ran or
+    not: deleting the filter from the tool was a green mutation. The verdict is
+    therefore an exclusion, and it needs a non-matching entry to exist, so the
+    unfiltered listing is asserted to hold exactly 1 document entry first: without that
+    line, "the document is gone" is satisfied by a listing that never had one.
+
+    Both calls take ``include_preserved``: the tab's own document request is retired by
+    the navigation it delivered, so the live ring holds none.
+    """
     uid = await goto_and_find(client, f"{flask_server}/network", PROFILE, "POST /api/echo")
 
     await client.call_tool("click", {"profile": PROFILE, "uid": uid})
 
-    result = await poll_tool_or_last(
+    unfiltered = await poll_tool_or_last(
         client,
         "list_network_requests",
-        {"profile": PROFILE, "resource_types": ["fetch", "xhr"]},
+        {"profile": PROFILE, "include_preserved": True},
         _completed("/api/echo"),
     )
-    assert "/api/echo" in result, result
+    document = line_with(unfiltered, _DOCUMENT_FIELD)
+
+    filtered = tool_text(
+        await client.call_tool(
+            "list_network_requests",
+            {"profile": PROFILE, "include_preserved": True, "resource_types": ["fetch", "xhr"]},
+        )
+    )
+    assert completed_entry(filtered, "/api/echo") is not None, filtered
+    assert document not in filtered, filtered
 
 
 async def test_a_binary_post_body_does_not_poison_the_next_tool_call(
