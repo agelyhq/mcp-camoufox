@@ -60,6 +60,25 @@ def test_bind_hands_back_a_proof_that_withdraws_that_publication(
     assert not advert.exists()
 
 
+@pytest.mark.parametrize("payload", ["null", "3", '"x"', "[]", '{"host": 1}', "not json at all"])
+def test_a_corrupt_advert_reads_as_no_advert(cfg: ServerConfig, payload: str) -> None:
+    """A proxy meeting a damaged advert must start a daemon, not raise.
+
+    The loopback advert is JSON, and valid JSON is not necessarily an object: asking
+    ``"host" in data`` of ``null`` or ``3`` raises ``TypeError``, and of a string it
+    answers with a substring match, so a truncated or hand-edited file used to come out
+    of ``resolve`` as an exception rather than as "nothing is advertised". Unreadable
+    already meant no advert; corrupt has to mean the same thing.
+    """
+    endpoint = LoopbackEndpoint()
+    paths.endpoint_path(cfg).write_text(payload, encoding="utf-8")
+
+    assert endpoint.resolve(cfg) is None
+    assert endpoint.advert_id(cfg) is None
+    # And it is not mistaken for a live daemon's, so it never blocks a withdrawal.
+    assert endpoint.cleanup_if_owned(cfg, "8000:deadbeef") is True
+
+
 @pytest.mark.parametrize("name", _STRATEGIES)
 def test_a_later_publication_makes_the_earlier_proof_worthless(
     cfg: ServerConfig, name: str

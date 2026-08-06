@@ -26,7 +26,10 @@ if TYPE_CHECKING:
     from camoufox_mcp.config import ServerConfig
 
 _UDS_HOST = "http://camoufox-daemon"
-_HARDEN_DEADLINE_S = 10.0
+# How long the daemon gives itself to tighten the socket after uvicorn creates it. Public
+# because the test harness waits on the same budget: a shorter one there would fail a daemon
+# that is still inside its own contract, which is how a loaded runner invents a defect.
+HARDEN_DEADLINE_S = 10.0
 _HARDEN_POLL_S = 0.05
 
 
@@ -59,7 +62,7 @@ class UnixSocketEndpoint(DaemonEndpoint):
         # uvicorn chmods a freshly created Unix socket to 0o666; that would let any
         # local user reach /shutdown and the full browser-driving MCP surface.
         path = daemon_socket_path(config)
-        deadline = time.monotonic() + _HARDEN_DEADLINE_S
+        deadline = time.monotonic() + HARDEN_DEADLINE_S
         while time.monotonic() < deadline:
             if path.exists():
                 path.chmod(0o600)

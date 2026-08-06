@@ -168,12 +168,49 @@ async def test_a_release_is_never_handed_a_handle_still_in_use() -> None:
     assert order == ["operation ended", "released"], order
 
 
+async def test_an_unread_error_reaches_the_instruments_watching_for_one(
+    loop_reports: list[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Make the positive case happen on purpose, so the absence asserted below means something.
+
+    "No report landed" is worth nothing from an instrument that cannot report one. What
+    the next test watches for is an exception nobody retrieved from a future the driver
+    was left holding, so one is abandoned here deliberately and read back through the
+    same driven window. These 2 channels are the ones the next test may claim an
+    absence on, and they are exactly the ones proved here.
+
+    Captured stderr is NOT one of them, which is why it is absent from both tests. The
+    report reaches this process as a ``logging`` record on the ``asyncio`` logger, and
+    under pytest the logging plugin's own handler takes it, so it never reaches file
+    descriptor 2 and the positive case cannot be made to appear there (measured: this
+    test fails on ``capfd`` alone while both channels below hold). Claiming an absence
+    on it would have been a third assertion that no defect can turn red.
+    """
+    _abandon_a_failed_future()
+    await _driven_until(lambda: any(UNREAD in line for line in loop_reports))
+
+    assert [line for line in loop_reports if UNREAD in line], loop_reports
+    assert UNREAD in caplog.text, caplog.text
+
+
+def _abandon_a_failed_future() -> None:
+    """Set an exception on a future nobody keeps a reference to.
+
+    The future is unreachable the moment this statement ends, so its destructor is what
+    reports the exception, which is exactly how a protocol reply whose caller is already
+    gone gets reported.
+    """
+    asyncio.get_running_loop().create_future().set_exception(
+        RuntimeError("an answer nobody is left to read")
+    )
+
+
 async def test_an_expired_operation_leaves_no_unread_error_behind(
     client: Client,
     flask_server: str,
     deps: ToolDeps,
     loop_reports: list[str],
-    capfd: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A budget that expires must not leave the driver holding an answer for nobody.
@@ -181,10 +218,14 @@ async def test_an_expired_operation_leaves_no_unread_error_behind(
     Proving an absence needs a window, so the window is driven instead of slept
     through: the loop below collects garbage and lets the loop deliver the driver's
     late answer until a report appears, and the assertion fires on the first one. The
-    reports are read from the loop's exception handler rather than only from captured
-    output, so the test cannot go green merely because the report landed a
-    millisecond after a fixed nap ended. The handler still forwards to the default
-    one, because the printed line is what actually costs the team.
+    reports are read from the loop's exception handler as well as from the log, so the
+    test cannot go green merely because the report landed a millisecond after a fixed
+    nap ended. The handler still forwards to the default one, which is what turns the
+    report into the log record the team actually sees.
+
+    Both channels are proved able to see the positive case in the test above, and the
+    claim is limited to them: a third assertion on captured stderr used to sit here,
+    and the report cannot be made to appear there under pytest at all.
     """
     await open_page(client, f"{flask_server}/click")
     session = deps.sessions.get(PROFILE)
@@ -202,7 +243,6 @@ async def test_an_expired_operation_leaves_no_unread_error_behind(
 
     assert not [line for line in loop_reports if UNREAD in line], loop_reports
     assert UNREAD not in caplog.text, caplog.text
-    assert UNREAD not in capfd.readouterr().err
 
 
 async def _driven_until(reported: Callable[[], bool]) -> None:

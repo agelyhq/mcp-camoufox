@@ -61,15 +61,16 @@ class ConsoleMonitor:
         self,
         *,
         levels: list[str] | None = None,
-        page_size: int | None = None,
-        page_idx: int = 0,
         include_preserved: bool = False,
     ) -> tuple[list[ConsoleEntry], int]:
-        """Captured messages, oldest first, and the total that matched before paging."""
+        """Captured messages, oldest first, and the total that matched.
+
+        Unpaged, unlike the network listing: ``list_console_messages`` exposes no page
+        parameters and keeps the TAIL of the match, since a console is read for what just
+        happened. A page size and a page index here never had a caller.
+        """
         wanted = {level.lower() for level in levels} if levels else None
         return self._log.select(
             keep=None if wanted is None else (lambda entry: entry.level in wanted),
-            page_size=page_size,
-            page_idx=page_idx,
             include_preserved=include_preserved,
         )

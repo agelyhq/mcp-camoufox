@@ -3,10 +3,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
 
 from platformdirs import user_data_dir
 
+from camoufox_mcp.proxy_url import parse_proxy
 from camoufox_mcp.session_defaults import SessionDefaults
 
 VALID_OS = frozenset({"windows", "linux", "macos"})
@@ -49,13 +49,18 @@ def ensure_private_dir(path: Path) -> Path:
 def parse_headless(raw: str | None, *, unset: bool | str | None = False) -> bool | str | None:
     """Canonical ``CAMOUFOX_HEADLESS`` / ``headless`` parser and validator.
 
-    ``unset`` is returned when ``raw`` is ``None``: the config layer passes
+    ``unset`` is returned when ``raw`` is ``None`` or empty: the config layer passes
     ``False`` (a visible window is the server-wide default) while ``navigate``
     passes ``None`` so an omitted per-call override falls back to that default.
     ``"true"``/``"false"`` map to ``bool`` and ``"virtual"`` stays a string; any
     other value raises ``ValueError`` listing the valid names.
+
+    An empty value counts as unset, like every other optional variable: ``.env.example``
+    is shipped for people to copy and edit, so a variable left blank there must not be
+    the difference between a server that starts and a traceback on stderr before logging
+    exists, which the client only sees as a dead server.
     """
-    if raw is None:
+    if raw is None or raw.strip() == "":
         return unset
     value = raw.strip().lower()
     if value not in VALID_HEADLESS:
@@ -155,7 +160,7 @@ class ServerConfig:
 
     @classmethod
     def from_env(cls) -> ServerConfig:
-        proxy = _parse_proxy(os.getenv("CAMOUFOX_PROXY"))
+        proxy = parse_proxy(os.getenv("CAMOUFOX_PROXY"))
         data_dir = Path(os.getenv("CAMOUFOX_DATA_DIR") or user_data_dir(_APP_NAME))
         return cls(
             headless=parse_headless(os.getenv("CAMOUFOX_HEADLESS")),
@@ -244,23 +249,6 @@ def _parse_ttl(raw: str | None) -> int:
     return value
 
 
-def _parse_proxy(raw: str | None) -> dict[str, str] | None:
-    if not raw:
-        return None
-    parsed = urlparse(raw)
-    if not parsed.hostname:
-        raise ValueError(f"Invalid CAMOUFOX_PROXY: {raw!r}")
-    scheme = parsed.scheme or "http"
-    host = parsed.hostname
-    server = f"{scheme}://{host}:{parsed.port}" if parsed.port else f"{scheme}://{host}"
-    proxy: dict[str, str] = {"server": server}
-    if parsed.username:
-        proxy["username"] = parsed.username
-    if parsed.password:
-        proxy["password"] = parsed.password
-    return proxy
-
-
 def _parse_addons(raw: str | None) -> tuple[str, ...]:
     if raw is None:
         return DEFAULT_ADDON_URLS
@@ -271,9 +259,10 @@ def _parse_addons(raw: str | None) -> tuple[str, ...]:
 
 def _parse_session_defaults() -> SessionDefaults:
     width, height = _parse_viewport(os.getenv("CAMOUFOX_VIEWPORT"))
-    fingerprint_os = os.getenv("CAMOUFOX_FINGERPRINT_OS")
-    if fingerprint_os is not None:
-        fingerprint_os = validate_fingerprint_os(fingerprint_os)
+    raw_os = os.getenv("CAMOUFOX_FINGERPRINT_OS")
+    # Empty means unset, as everywhere else: a blank line copied out of .env.example
+    # must not be the difference between a server that starts and one that does not.
+    fingerprint_os = validate_fingerprint_os(raw_os) if raw_os and raw_os.strip() else None
     return SessionDefaults(
         fingerprint_os=fingerprint_os,
         viewport_width=width,
@@ -288,4 +277,9 @@ def _parse_viewport(raw: str | None) -> tuple[int | None, int | None]:
     parts = raw.lower().split("x")
     if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
         raise ValueError(f"Invalid CAMOUFOX_VIEWPORT={raw!r}; expected e.g. '1280x720'")
-    return int(parts[0]), int(parts[1])
+    width, height = int(parts[0]), int(parts[1])
+    # A zero dimension parses but cannot launch, and the launcher's own complaint names
+    # neither the value nor the variable: reject it where the variable is still in hand.
+    if width == 0 or height == 0:
+        raise ValueError(f"Invalid CAMOUFOX_VIEWPORT={raw!r}; both dimensions must be > 0")
+    return width, height

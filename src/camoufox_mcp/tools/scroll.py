@@ -33,11 +33,16 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
             direction: down, up, left or right. Ignored when ``uid`` is given.
             amount: Pixels; 1 viewport length when omitted. Ignored with ``uid``.
         """
+        # Before ``get_session``, and on both branches: a closed set of words is
+        # rejected once, at the top of the body, before any side effect. Checked after
+        # the session, a bad direction launched a whole browser to be told it was
+        # invalid, and the uid branch returned before ever reaching the check, so
+        # ``direction="sideways"`` was silently accepted there.
+        validate_choice("direction", direction, tuple(_DELTAS))
         session = await get_session(deps, profile)
         page = get_page(session)
         if uid is not None:
             return f"Scrolled <{await scroll_uid(page, uid)}> into view"
-        validate_choice("direction", direction, tuple(_DELTAS))
         dx_sign, dy_sign = _DELTAS[direction]
         if amount is None:
             axis = "innerWidth" if dx_sign else "innerHeight"

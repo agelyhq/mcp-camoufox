@@ -14,6 +14,11 @@ rather than raced for in a browser: a test that has to win a race reports covera
 does not have. The real-browser half of the same rule, a SUB-frame navigation retiring
 nothing, is in ``test_subframe_navigation.py``.
 
+Which document requests are the tab's own is not guesswork either: on the 152.0.4-beta.28
+build a request announces the frame that asked for it, the tab's document answering with
+the main frame and both a declared and a freshly injected iframe answering with a
+sub-frame, all 3 under the same ``document`` resource type.
+
 Every assertion is about the DEFAULT listing (``include_preserved`` off), because that
 is the one an agent calls, and a total of 0 is what the tool renders as "No network
 requests captured.".
@@ -32,6 +37,8 @@ if TYPE_CHECKING:
 DOC = "http://tab.test/infinite-scroll"
 FETCH = "http://tab.test/api/items?page=0"
 OTHER = "http://tab.test/other"
+LATE = "http://tab.test/other/late.js"
+EMBED = "http://tab.test/embed"
 
 
 def _tab() -> tuple[EventTab, Page]:
@@ -127,3 +134,88 @@ def test_a_navigation_carrying_no_document_request_retires_the_whole_ring() -> N
     assert total == 0, _urls(live)
     both, _ = page.network.list_entries(include_preserved=True)
     assert _urls(both) == [DOC, FETCH]
+
+
+def test_an_embed_s_document_is_not_the_rotation_boundary() -> None:
+    """The boundary is the TAB's document request, not any document request.
+
+    Firefox announces an embed's own document under the same ``document`` resource type
+    as the tab's, so a boundary taken from either lands in the MIDDLE of the current
+    document's life whenever a page loads an ad slot, a captcha or a video player. The
+    next commit then retires only up to that embed and leaves everything the replaced
+    document asked for after it live, which is the inverse of what a rotation is for.
+    """
+    events, page = _tab()
+
+    first = events.request(OTHER, "document")
+    events.respond(first)
+    events.navigated()
+    embed = events.request(EMBED, "document", events.subframe)
+    events.respond(embed)
+    # Asked for by the document that is about to be replaced, after its embed loaded.
+    late = events.request(LATE, "script")
+    events.respond(late)
+
+    second = events.request(DOC, "document")
+    events.respond(second)
+    events.navigated()
+    fetch = events.request(FETCH, "fetch")
+    events.respond(fetch)
+
+    live, total = page.network.list_entries()
+    assert total == 1, _urls(live)
+    assert _urls(live) == [FETCH]
+    both, _ = page.network.list_entries(include_preserved=True)
+    assert LATE in _urls(both)
+
+
+def test_a_document_request_with_no_readable_frame_is_not_the_rotation_boundary() -> None:
+    """Reading a request's frame can raise, and the monitor is inside event dispatch.
+
+    Playwright answers with an error for a service worker's request, which has no frame,
+    and for a navigation request whose frame does not exist yet. Neither is the tab's own
+    document, so both must read as "not the boundary", and neither may escape the
+    listener: Playwright stashes what a handler raises and re-raises it on the next
+    unrelated api call, which is how issue #13 turned a binary upload into a TypeError
+    from another tool.
+    """
+    events, page = _tab()
+
+    document = events.request(DOC, "document")
+    events.respond(document)
+    events.navigated()
+    fetch = events.request(FETCH, "fetch")
+    events.respond(fetch)
+    embed = events.request_with_unreadable_frame(EMBED, "document")
+    events.respond(embed)
+    late = events.request(LATE, "script")
+    events.respond(late)
+
+    # No document request of the TAB's own since the rotation, so this navigation has
+    # none: about:blank, a data: URL or a same-document history move, and nothing in the
+    # ring can belong to what the tab now shows.
+    events.navigated()
+
+    live, total = page.network.list_entries()
+    assert total == 0, _urls(live)
+    both, _ = page.network.list_entries(include_preserved=True)
+    assert _urls(both) == [DOC, FETCH, EMBED, LATE]
+
+
+def test_an_embed_s_document_is_not_evidence_that_the_tab_navigated() -> None:
+    """``last_document_reqid`` answers the settling wait in ``tools/_page_line.py``.
+
+    A tab whose ad slot loads while a click is being answered has not moved, and a mark
+    that says otherwise buys every such click the full commit budget instead of the
+    evidence window.
+    """
+    events, page = _tab()
+
+    events.request(DOC, "document")
+    events.navigated()
+    moved = page.network.last_document_reqid
+
+    events.request(EMBED, "document", events.subframe)
+    events.request_with_unreadable_frame(f"{EMBED}?round=2", "document")
+
+    assert page.network.last_document_reqid == moved

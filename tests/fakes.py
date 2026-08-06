@@ -22,7 +22,7 @@ import inspect
 from typing import TYPE_CHECKING, Any
 
 from camoufox_mcp.dom.registry import ElementRegistry
-from camoufox_mcp.sessions.errors import PLAYWRIGHT_TARGET_CLOSED_ERROR
+from camoufox_mcp.sessions.errors import PLAYWRIGHT_ERROR, PLAYWRIGHT_TARGET_CLOSED_ERROR
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -177,13 +177,22 @@ class FakeFrame:
 
 
 class FakeRequest:
-    """The fields ``NetworkMonitor`` reads off a Playwright ``Request``, and no others."""
+    """The fields ``NetworkMonitor`` reads off a Playwright ``Request``, and no others.
+
+    ``frame=None`` stands for a request whose frame the real property answers for with an
+    error rather than a frame: a service worker's request has none, and a navigation
+    request can be reported before its frame is created. It raises here too, and with
+    Playwright's own error class, so a monitor that reads the frame without expecting that
+    fails in this suite instead of inside Playwright's event dispatch, where the exception
+    is stashed and re-raised on the next api call.
+    """
 
     def __init__(
         self,
         url: str,
         resource_type: str,
         *,
+        frame: FakeFrame | None = None,
         method: str = "GET",
         post_data_buffer: bytes | None = None,
     ) -> None:
@@ -192,6 +201,13 @@ class FakeRequest:
         self.method = method
         self.headers: dict[str, str] = {}
         self.post_data_buffer = post_data_buffer
+        self._frame = frame
+
+    @property
+    def frame(self) -> FakeFrame:
+        if self._frame is None:
+            raise PLAYWRIGHT_ERROR("Frame for this navigation request is not available")
+        return self._frame
 
 
 class FakeResponse:
@@ -225,9 +241,18 @@ class EventTab:
         for handler in self._handlers.get(event, []):
             handler(arg)
 
-    def request(self, url: str, resource_type: str) -> FakeRequest:
-        """Announce a request and return it, so a response can be emitted for it."""
-        request = FakeRequest(url, resource_type)
+    def request(self, url: str, resource_type: str, frame: FakeFrame | None = None) -> FakeRequest:
+        """Announce a request from ``frame``, the main one unless told otherwise.
+
+        Returned so a response can be emitted for it.
+        """
+        return self._announce(FakeRequest(url, resource_type, frame=frame or self.main_frame))
+
+    def request_with_unreadable_frame(self, url: str, resource_type: str) -> FakeRequest:
+        """Announce a request whose frame Playwright answers for with an error."""
+        return self._announce(FakeRequest(url, resource_type, frame=None))
+
+    def _announce(self, request: FakeRequest) -> FakeRequest:
         self.emit("request", request)
         return request
 

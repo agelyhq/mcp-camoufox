@@ -43,6 +43,8 @@ const store = {
       return locate(store, a);
     }),
     resolve: guard((a) => resolveOne(store, a)),
+    // The only op that reads no element id, so it needs neither the store nor a sweep.
+    extract: guard((a) => extract(a)),
     scrollTo: guard((a) => scrollTo(store, a)),
     prepareFill: guard((a) => prepareFill(store, a)),
     selectOptions: guard((a) => selectOptions(store, a)),

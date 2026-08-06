@@ -15,6 +15,7 @@ _ORDER = (
     "45_query.js",
     "50_geometry.js",
     "60_actions.js",
+    "65_extract.js",
     "70_ops.js",
 )
 
@@ -26,6 +27,7 @@ DISPATCH = "(store, a) => store.ops[a.op](a)"
 OPS = frozenset(
     {
         "capture",
+        "extract",
         "locate",
         "resolve",
         "scrollTo",

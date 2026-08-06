@@ -4,24 +4,29 @@ Everything is configured through environment variables, set in your MCP client's
 config. There is no config file. `config.py` is the only module that reads the
 environment, so this list is complete.
 
-A copy of it lives in [.env.example](../.env.example).
+A copy of it lives in [.env.example](../.env.example), which is meant to be copied and
+edited, so sourcing it unedited starts a working server: every variable left blank there
+falls back to its default. Two read a blank value as a deliberate choice rather than as
+"unset", and both say so in place: `CAMOUFOX_ADDON_URLS` (blank loads no addons of ours)
+and `CAMOUFOX_BROWSER_VERSION` (blank unpins the browser, so that one ships commented
+out).
 
 ## 📋 Variables
 
 | Variable | Default | What it does |
 |---|---|---|
 | `CAMOUFOX_HEADLESS` | a visible window | `true` (headless), `virtual` (Xvfb, Linux only), `false` (visible). See below. |
-| `CAMOUFOX_PROXY` | none | `http://user:pass@host:port`. Parsed into a Playwright proxy and turns on GeoIP, so timezone, locale and geolocation follow the exit IP. |
+| `CAMOUFOX_PROXY` | none | `http://user:pass@host:port`. Parsed into a Playwright proxy and turns on GeoIP, so timezone, locale and geolocation follow the exit IP. Credentials are percent-decoded, which is the only way to express a password containing `@` or `:`: write those `%40` and `%3A`, and a literal `%` as `%25`. An IPv6 host keeps its brackets, `http://[::1]:3128`. A non-numeric port is refused at startup. |
 | `CAMOUFOX_DATA_DIR` | OS user data directory | Where profiles and logs live. |
-| `CAMOUFOX_VIEWPORT` | Camoufox default | Window size, for example `1280x720`. |
+| `CAMOUFOX_VIEWPORT` | Camoufox default | Window size, for example `1280x720`. Both dimensions must be greater than 0. |
 | `CAMOUFOX_FINGERPRINT_OS` | random | `windows`, `linux` or `macos`. |
 | `CAMOUFOX_LOCALE` | Camoufox default | Browser locale, for example `en-US`. |
 | `CAMOUFOX_ADDON_URLS` | built-in defaults | Comma-separated list of addon URLs, replacing this project's defaults. Camoufox loads uBlock Origin into every browser it launches on its own, and no value here removes it: that is `CAMOUFOX_BUNDLED_ADDONS`. |
 | `CAMOUFOX_BUNDLED_ADDONS` | `true` | Set `false` to launch without the addons Camoufox bundles itself (uBlock Origin), which is the only way to remove them. Leave it on unless you need a browser holding nothing you did not put there. |
 | `CAMOUFOX_AUTO_UPDATE` | `true` | Set `false` to skip the startup browser and GeoIP update check. |
 | `CAMOUFOX_HUMANIZE` | off | Maximum cursor travel time in seconds, for example `1.5`. Read the warning below before enabling. |
-| `CAMOUFOX_BROWSER_VERSION` | the tested build | Pins the browser build, for example `152.0.4-beta.28`. Set it to `latest` to follow whatever upstream published last, which is how an install can change Firefox major version without any change on your side. |
-| `CAMOUFOX_BINARY` | Camoufox's own cache | Explicit path to a Camoufox executable. |
+| `CAMOUFOX_BROWSER_VERSION` | the tested build | Pins the browser build, for example `152.0.4-beta.28`. Set it to `latest`, or to an empty value, to follow whatever upstream published last, which is how an install can change Firefox major version without any change on your side. |
+| `CAMOUFOX_BINARY` | Camoufox's own cache | Explicit path to a Camoufox executable. It wins over `CAMOUFOX_BROWSER_VERSION`, so a path that does not exist is refused at startup by name instead of being worked around by a download the launch would ignore. |
 | `CAMOUFOX_DAEMON` | `false` | `true` routes everything through a shared daemon. See [daemon.md](daemon.md). |
 | `CAMOUFOX_DAEMON_TTL` | `1800` | Daemon idle shutdown, in seconds. Only meaningful with the daemon on. |
 
@@ -99,12 +104,20 @@ is a login somebody signed into by hand, so it stayed where it is.
 Inside it:
 
 ```
-profiles/<profile>/   persistent browser context, one per profile name
-logs/<profile>.jsonl  telemetry, one line per tool call
-logs/_server.jsonl    server lifecycle records
-addons/               downloaded extension archives, shared by every profile
-daemon/               socket, lock and log, only when the daemon is on
+profiles/<profile>/       persistent browser context, one per profile name
+logs/<profile>.jsonl      telemetry, one line per tool call
+logs/_server.jsonl        server lifecycle records
+logs/server-<stamp>.log   the Python log, 1 new file per start, never rotated
+addons/                   downloaded extension archives, shared by every profile
+daemon/                   socket, lock and log, only when the daemon is on
 ```
+
+`server-<stamp>.log` holds everything the server logs after the configuration is read, so
+it is the first thing to open when a client reports a dead server. A bad value in one of
+the variables above is the exception: it is rejected before this file exists, and the
+message reaches the client's own stderr log only. It is stamped rather than rotated, so a
+client that restarts the server often accumulates 1 small file per start: delete them
+freely, they are never read back.
 
 Profile directories are created owner-only. They hold live session cookies for every
 site you signed into, so treat them like credentials: see [profiles.md](profiles.md).

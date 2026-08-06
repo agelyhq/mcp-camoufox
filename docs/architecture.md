@@ -8,6 +8,7 @@ src/camoufox_mcp/
   server.py            entry point: logging setup and main()
   bootstrap.py         composition root: server name, instructions, dependencies, lifespan
   config.py            the only module that reads os.environ; frozen ServerConfig
+  proxy_url.py         both directions of a proxy URL: parsing and redaction, in 1 place
   session_defaults.py  frozen dataclass of per-session creation options
   updater.py           throttled, non-blocking, fail-open auto-update
   telemetry.py         per-profile JSONL logger (+ telemetry_intent.py for evaluate)
@@ -30,8 +31,8 @@ src/camoufox_mcp/
 
 Dependencies point inward: `tools/` uses `sessions/` and `dom/`, which use `config.py`.
 Nothing points back out. `dom/` in particular must not import from `sessions/`; it
-works against a small protocol (`EvaluatablePage`, anything with `.evaluate`), which is
-why it can be tested and reasoned about without a browser.
+works against a small protocol (`RegistryPage`, anything owning an `.elements` store),
+which is why it can be tested and reasoned about without a browser.
 
 ## 🗂️ Sessions
 
@@ -59,12 +60,16 @@ Retiring the whole ring then discarded requests belonging to the document the ca
 asking about, and `list_network_requests` answered "No network requests captured." for a
 page whose fetch had already been answered 200. So the network monitor retires by entry
 id: everything recorded after a navigation's own document request was asked for by the
-document that request delivered, and the boundary is the FIRST document request since the
-last rotation, so a sub-frame navigating while the commit is in flight cannot push it past
-the main document's sub-resources. A navigation carrying no document request at all
-(`about:blank`, a `data:` URL, a same-document history move) retires the whole ring, and so
-does every console rotation: a message carries no evidence of its document, and needs none,
-since messages and commits are both announced by the content process.
+document that request delivered. Only the tab's own main-frame document requests are
+candidates, since Firefox announces an embed's document under the same `document`
+resource type and a boundary taken from one of those lands in the middle of the current
+document's life. Of the candidates the boundary is the FIRST since the last rotation, not
+the latest, because a redirect chain and a navigation superseded before it committed both
+leave 2 outstanding, and the commit that lands belongs to only 1 of them. A navigation
+carrying no document request of the tab's own (`about:blank`, a `data:` URL, a
+same-document history move) retires the whole ring, and so does every console rotation: a
+message carries no evidence of its document, and needs none, since messages and commits
+are both announced by the content process.
 
 `Page.raw` is the single escape hatch to Playwright, and it is restricted to the surface
 verified to leave no trace in the page: `mouse`, `keyboard`, `screenshot`, `goto` and

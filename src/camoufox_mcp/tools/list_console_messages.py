@@ -33,9 +33,9 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
         session = await get_session(deps, profile)
         page = get_page(session)
         matched, _ = page.console.list_entries(levels=levels, include_preserved=include_preserved)
-        # The tail, not a page: a console is read for what just happened, so the
-        # newest messages are the ones worth the tokens. The monitor pages like the
-        # network one; which end of the match to keep is this tool's own policy.
+        # The tail, not a page: a console is read for what just happened, so the newest
+        # messages are the ones worth the tokens. The monitor does not page at all; which
+        # end of the match to keep is this tool's own policy.
         entries = matched[-limit:] if limit > 0 else matched
         if not entries:
             return "No console messages captured."

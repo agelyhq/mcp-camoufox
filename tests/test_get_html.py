@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from tests.helpers import BIG_TEXT_JS, PROFILE, evaluate, open_page, tool_text
@@ -8,6 +9,51 @@ if TYPE_CHECKING:
     from fastmcp import Client
 
 _MARKER = "SCRIPT_MARKER_SHOULD_BE_STRIPPED"
+
+# The 5 page-owned entry points this read used to resolve at call time, replaced with
+# versions that count and, for the 3 the strip pass walked, lie about what they found.
+#
+# `NodeList.prototype.forEach` as a no-op is the reason this test exists. It is not an
+# observability leak, it is a wrong answer: the pass that removes <script> elements from
+# the clone visited nothing, so the page kept its scripts in output that had asked for
+# none, and nothing said so. `Document.prototype.querySelector` answering null is the
+# same class of defeat one step earlier: a scope that exists reads as absent.
+HOSTILE_PROTOTYPES_JS = """
+(() => {
+  window.__hostile =
+    { querySelector: 0, querySelectorAll: 0, cloneNode: 0, forEach: 0, remove: 0 };
+  const seen = (what) => { window.__hostile[what]++; };
+  Document.prototype.querySelector = function () { seen('querySelector'); return null; };
+  Element.prototype.querySelectorAll = function () { seen('querySelectorAll'); return []; };
+  NodeList.prototype.forEach = function () { seen('forEach'); };
+  Element.prototype.remove = function () { seen('remove'); };
+  const clone = Node.prototype.cloneNode;
+  Node.prototype.cloneNode = function (deep) { seen('cloneNode'); return clone.call(this, deep); };
+  return 1;
+})()
+"""
+
+# The control for the hooks above: page code calling each one, so a tally of zeros can
+# only mean our calls went elsewhere. Without it, a typo in the hook names would make
+# every counter stay at 0 forever and certify any implementation as clean.
+CALL_THE_HOOKS_JS = """
+(() => {
+  document.querySelector('body');
+  document.body.querySelectorAll('script');
+  document.body.cloneNode(false);
+  document.querySelectorAll('script').forEach(() => {});
+  document.createElement('div').remove();
+  return JSON.stringify(window.__hostile);
+})()
+"""
+
+_NO_HOSTILE_CALLS = {
+    "querySelector": 0,
+    "querySelectorAll": 0,
+    "cloneNode": 0,
+    "forEach": 0,
+    "remove": 0,
+}
 
 
 async def _get_html(client: Client, **kwargs: object) -> str:
@@ -116,6 +162,50 @@ async def test_observation_truncation_points_at_get_html(client: Client, flask_s
     assert note.endswith(" chars. This cap is fixed, call get_html for the full text]")
     assert "max_chars" not in note
     assert "x" * 5000 in await _get_html(client, mode="text", max_chars=0)
+
+
+async def test_strip_scripts_survives_a_page_that_owns_the_prototypes(
+    client: Client, flask_server: str
+) -> None:
+    """A page replacing the prototypes this read walks can neither see it nor break it.
+
+    ``strip_scripts`` was defeatable, which is worse than observable: the removal pass
+    called ``NodeList.prototype.forEach``, so a page replacing it with a no-op was handed
+    back its own ``<script>`` elements by a caller that had asked for none, and the answer
+    looked exactly like a correct one. Everything here now goes through the boot table of
+    ``dom/js/00_boot.js``.
+
+    The snapshot before the hooks is load-bearing and not incidental: the capture happens
+    when the store first runs, and the limit stated in ``docs/anti-bot.md`` is that a page
+    patching BEFORE that does see us. This measures the half the capture can win, which is
+    every patch installed afterwards.
+    """
+    await open_page(client, f"{flask_server}/get-html")
+    tool_text(await client.call_tool("snapshot", {"profile": PROFILE}))
+
+    assert await evaluate(client, PROFILE, HOSTILE_PROTOTYPES_JS) == "1"
+
+    stripped = await _get_html(client, max_chars=0)
+    assert _MARKER not in stripped, "the page's own forEach decided what strip_scripts kept"
+    assert '<article id="main-article"' in stripped
+
+    # The scope is resolved through the same table: the hostile querySelector answers
+    # null, so a read that went through it would report that the article does not exist.
+    scoped = await _get_html(client, selector="#main-article")
+    assert scoped.strip().startswith('<article id="main-article"')
+    assert "The quick brown fox jumps over the lazy dog." in scoped
+
+    assert await _get_html(client, selector="#lead", mode="text") == (
+        "The quick brown fox jumps over the lazy dog."
+    )
+
+    counts = json.loads(await evaluate(client, PROFILE, "window.__hostile"))
+    assert counts == _NO_HOSTILE_CALLS, f"the page counted our calls: {counts}"
+
+    # Control: the hooks really are installed, so the zeros above are about us and not
+    # about a probe that was never wired to anything.
+    called = json.loads(json.loads(await evaluate(client, PROFILE, CALL_THE_HOOKS_JS)))
+    assert all(hits >= 1 for hits in called.values()), called
 
 
 async def test_get_html_unlimited(client: Client, flask_server: str) -> None:

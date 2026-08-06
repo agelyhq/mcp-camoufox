@@ -49,10 +49,18 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
 def _resolve_points(
     x: float | None, y: float | None, points: list[list[float]] | None
 ) -> list[list[float]]:
+    """The points to click, or the 1 rejection every invalid combination shares.
+
+    An empty ``points`` list is one of those combinations, and it is tested by
+    truthiness rather than against ``None`` so that it is rejected here with the same
+    wording as the others. Read as a batch it named no point at all, so the tool
+    clicked nothing and reported success for it: the worst answer available, because a
+    caller cannot tell it from a click that landed.
+    """
     single = x is not None and y is not None
-    if single == (points is not None):
+    if single == bool(points):
         raise ValueError("provide exactly one of (x and y) or points")
-    if points is not None:
+    if points:
         return [[float(px), float(py)] for px, py in points]
     return [[float(x), float(y)]]
 

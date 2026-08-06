@@ -1,11 +1,14 @@
 """The contract of the element-identity rewrite: the page cannot tell we were here.
 
 One session arms the probes of :mod:`tests.probes` on an inert page and then drives every
-uid-consuming path over it. Nothing may be written to the DOM, no branded event may be
-dispatched, no observer may be constructed in the page realm, and no listener may appear
-on window. 2 controls answer the "compared with what?" question: 1 proves the probes fire
-on each signal, the other that the extension reading below names an extension when there
-is one, so neither a broken probe nor a blind reading can pass everything.
+path that reaches it: every uid-consuming one, and ``get_html``, which consumes none.
+``get_html`` is here because it was the 1 tool injecting a script of its own instead of
+going through the bundle, so neither guard test covered it and its clone-and-strip pass
+was free to mutate whatever it liked. Nothing may be written to the DOM, no branded event
+may be dispatched, no observer may be constructed in the page realm, and no listener may
+appear on window. 2 controls answer the "compared with what?" question: 1 proves the
+probes fire on each signal, the other that the extension reading below names an extension
+when there is one, so neither a broken probe nor a blind reading can pass everything.
 
 The claim is about what THIS server does, so the session runs with no extension at all:
 this project's own default addon is dropped and Camoufox's bundled uBlock Origin is
@@ -41,12 +44,27 @@ if TYPE_CHECKING:
     from fastmcp import FastMCP
 
 
+# The probe page is deliberately free of any script, which leaves ``strip_scripts``
+# nothing to strip and a strip of the LIVE tree indistinguishable from a correct one.
+# This adds 1 empty, inert script element, and it is added BEFORE the probes are armed
+# so the insertion is not itself a record: what the probes then have to stay silent
+# about is the removal of it.
+ADD_INERT_SCRIPT_JS = """
+(() => {
+  const inert = document.createElement('script');
+  inert.id = 'probe-inert-script';
+  document.body.appendChild(inert);
+  return 1;
+})()
+"""
+
+
 @pytest.fixture
 def mcp_server(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> FastMCP:
     return probe_server(monkeypatch, data_dir)
 
 
-async def _drive_every_uid_path(client: Client, upload: str) -> None:
+async def _drive_every_page_path(client: Client, upload: str) -> None:
     snap = tool_text(await client.call_tool("snapshot", {"profile": PROFILE}))
     button = extract_uid(snap, "Probe button")
     text = extract_uid(snap, "Full name")
@@ -79,6 +97,14 @@ async def _drive_every_uid_path(client: Client, upload: str) -> None:
                 "expression": "document.readyState === 'complete'",
             },
         ),
+        # The 3 shapes of the one read that takes no uid. ``strip_scripts`` on is the
+        # one that matters here: it clones the document element and removes nodes, and
+        # the probes are watching ``documentElement`` for exactly that. A pass that
+        # ever stripped the live tree instead of the copy would be recorded below as a
+        # childList mutation naming the <script> it took away.
+        ("get_html", {"profile": PROFILE, "max_chars": 0}),
+        ("get_html", {"profile": PROFILE, "selector": "#probe-btn", "strip_scripts": False}),
+        ("get_html", {"profile": PROFILE, "mode": "text"}),
     ]
     for name, args in calls:
         result = await client.call_tool(name, args)
@@ -87,15 +113,16 @@ async def _drive_every_uid_path(client: Client, upload: str) -> None:
             assert not text_result.startswith(("Error:", "Timeout:")), f"{name}: {text_result}"
 
 
-async def test_no_markers_on_any_uid_path(
+async def test_no_markers_on_any_page_path(
     client: Client, tmp_path: Path, data_dir: Path, flask_server: str
 ) -> None:
     await open_page(client, f"{flask_server}/probe")
+    assert await evaluate(client, PROFILE, ADD_INERT_SCRIPT_JS) == "1"
     await arm_probes(client)
 
     upload = tmp_path / "marker-free.txt"
     upload.write_bytes(b"marker free upload")
-    await _drive_every_uid_path(client, str(upload))
+    await _drive_every_page_path(client, str(upload))
 
     probes = await probes_after_the_leak_window(client)
 
