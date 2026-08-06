@@ -4,10 +4,10 @@ import asyncio
 import contextlib
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
 
 from fastmcp import FastMCP
 
+from camoufox_mcp.proxy_url import redact_proxy
 from camoufox_mcp.sessions import SessionManager
 from camoufox_mcp.telemetry import TelemetryLogger, UsageRecord, now_iso
 from camoufox_mcp.tools import register_all_tools
@@ -121,7 +121,12 @@ def build_server(config: ServerConfig, deps: ToolDeps | None = None) -> FastMCP:
         await ensure_browser_present(config)
         refresh = schedule_refresh(config)
         try:
-            yield {"config": config, "sessions": sessions, "telemetry": telemetry}
+            # Deliberately empty. Whatever is yielded here becomes
+            # ``Context.lifespan_context``, FastMCP-visible from inside any tool body,
+            # and publishing config/sessions/telemetry there was the one route from a
+            # tool to the SessionManager that bypasses the injected ToolDeps. Nothing
+            # ever read it. Injection at registration is the only supported path.
+            yield {}
         finally:
             if refresh is not None:
                 refresh.cancel()
@@ -146,7 +151,7 @@ def _log_server_start(config: ServerConfig, telemetry: TelemetryLogger) -> None:
                 "data_dir": str(config.data_dir),
                 "auto_update": config.auto_update,
                 "addons": len(config.addon_urls),
-                "proxy": _redact_proxy(config.proxy),
+                "proxy": redact_proxy(config.proxy),
             },
             duration_ms=0.0,
             ok=True,
@@ -154,13 +159,3 @@ def _log_server_start(config: ServerConfig, telemetry: TelemetryLogger) -> None:
             result=None,
         )
     )
-
-
-def _redact_proxy(proxy: dict[str, str] | None) -> str | None:
-    """Reduce a proxy config to ``scheme://host``: never log credentials or port."""
-    if not proxy:
-        return None
-    parsed = urlparse(proxy.get("server", ""))
-    if not parsed.hostname:
-        return "REDACTED"
-    return f"{parsed.scheme or 'http'}://{parsed.hostname}"
