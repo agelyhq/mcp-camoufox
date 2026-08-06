@@ -32,6 +32,7 @@ async def ensure_browser_present(config: ServerConfig) -> None:
     (when the pinned build is absent) blocks to download it.
     Honors ``CAMOUFOX_AUTO_UPDATE=false`` (then a missing build is a hard error).
     """
+    _require_configured_binary(config)
     if binary_present(config):
         await _reassert_pin(config)
         return
@@ -43,12 +44,54 @@ async def ensure_browser_present(config: ServerConfig) -> None:
         )
     try:
         await asyncio.to_thread(update_browser, config.browser_version)
-        await asyncio.to_thread(update_geoip)
     except Exception as exc:
         raise BrowserSetupError(
             f"Camoufox download failed and build {_wanted(config)} is not present: {exc}"
         ) from exc
-    write_update_stamp(config)
+    if await _fetch_geoip():
+        write_update_stamp(config)
+
+
+def _require_configured_binary(config: ServerConfig) -> None:
+    """Reject a ``CAMOUFOX_BINARY`` naming something that is not on disk.
+
+    Camoufox gives ``executable_path`` precedence over the build it was told to launch, so
+    a bad path is never recovered by fetching anything. Left to ``binary_present``, the
+    start looked like a cold install: it downloaded the pinned build and made it ACTIVE,
+    changing which build every other camoufox consumer on the machine gets, and the launch
+    then failed anyway on the missing executable, with an error naming no path. A typo
+    belongs in the same class as an unknown pin: named, and fatal.
+    """
+    if not config.camoufox_binary or Path(config.camoufox_binary).exists():
+        return
+    raise BrowserSetupError(
+        f"CAMOUFOX_BINARY={config.camoufox_binary!r} does not exist. Correct the path, or "
+        "unset CAMOUFOX_BINARY to use the build Camoufox manages itself."
+    )
+
+
+async def _fetch_geoip() -> bool:
+    """Download the GeoIP database, fail-open, reporting whether it landed.
+
+    It only ever reaches a launch when a proxy is configured (``geoip_forced``), so a
+    proxy-less install must not be refused over an asset it never reads. Sharing the
+    browser download's ``try`` reported any GeoIP failure as "build X is not present"
+    while build X was on disk and fine: fatal, and untrue.
+
+    A ``False`` leaves the update stamp unwritten, so the background refresh this same
+    start schedules retries the fetch, rather than the 24h throttle sitting on an asset
+    we already know is missing.
+    """
+    try:
+        await asyncio.to_thread(update_geoip)
+    except Exception as exc:
+        logger.warning(
+            "Camoufox GeoIP database download failed; starting without it. Sessions using "
+            "CAMOUFOX_PROXY may report a timezone and locale that do not match the exit IP: %s",
+            exc,
+        )
+        return False
+    return True
 
 
 async def _reassert_pin(config: ServerConfig) -> None:
