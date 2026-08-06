@@ -6,6 +6,91 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-08-06
+
+What a read-only audit found once 0.3.4 was out. Nothing here was reported by a user, and
+most of it could not have been: the sharpest 2 are a page able to defeat a tool it asked for
+help from, and a server that refuses to start if you copy the example file this project ships.
+
+### Fixed
+
+- **A page could defeat `strip_scripts` and keep its own scripts in the answer.** `get_html`
+  was the only tool that built its own page script instead of going through the element layer,
+  so `document.querySelector`, `cloneNode`, `querySelectorAll` and `NodeList.prototype.forEach`
+  all resolved on the page's own prototypes when the call was made. Replacing that last one
+  with a no-op made the removal pass visit nothing, and the caller was handed the `<script>`
+  elements it had asked to have removed. The read is now an `extract` operation in the bundle:
+  7 more accessors are captured at boot, and the removal is an index loop with no array method
+  at all. The marker test drives `get_html` 3 ways now, which is the coverage hole that let
+  this live: that test walks every path consuming a uid, and `get_html` consumes none.
+- **Copying `.env.example` stopped the server from starting.** An empty value meant "unset"
+  for 11 of the 13 variables and an error for the other 2, and the shipped example ships 1 of
+  those 2 empty, under a header promising every variable is optional. The failure landed
+  before logging exists, so a client saw a dead server and no reason. Blank now means unset
+  everywhere except the 2 places where blank means something real, and those 2 are named in
+  the file, in the docs, and in a test that fails if a third joins them quietly.
+- **A typo in `CAMOUFOX_BINARY` changed which browser build every other tool on the machine
+  got.** A path that does not exist read as "no browser present", so the cold-install branch
+  ran, downloaded the pinned build and activated it machine-wide, an activation the launch
+  then ignored because an explicit binary wins. The error at the end never named the bad path.
+  It is refused up front now, naming both the path and the variable.
+- **A GeoIP download failure refused the start and blamed the browser.** It sat in the same
+  `try` as the browser install, so a MaxMind hiccup produced "build 152.0.4-beta.28 is not
+  present" about a build sitting on disk. GeoIP matters only when a proxy is configured, so a
+  proxy-less user was blocked by an asset they never use. It is fail-open now, warns, and
+  leaves the stamp unwritten so the next check retries instead of parking for 24h.
+- **Proxy URLs lost IPv6 brackets and never decoded credentials.** `http://[::1]:3128` became
+  `http://::1:3128`, which no browser can parse, and a password written `p%40ss` was sent
+  literally, so every request 407'd. Percent-encoding is the only way to spell a password
+  containing `@` or `:`, so those passwords could not be configured at all. Both directions of
+  a proxy URL live in 1 module now. A literal `%` must be written `%25`, which the URL grammar
+  always required, and that cost is pinned by its own test.
+- **`CAMOUFOX_VIEWPORT=1280x0` passed startup validation** and failed at every session launch
+  with a message about something else.
+- **A navigation could keep the old page's requests and drop the new page's.** The rotation
+  boundary added in 0.3.4 was set by any request of type "document", an iframe's included, so
+  an embed loading mid-page moved the boundary and the next navigation retired the wrong side.
+  The boundary is the tab's own main frame now, checked against Playwright's source and against
+  the pinned build rather than assumed, and a request whose frame cannot be read counts as not
+  the tab's rather than raising inside a listener.
+- **`fill_form` turned every failure into a `ValueError`.** A timeout stopped rendering as
+  `Timeout: ...`, and an off-contract exception stopped leaving a traceback in the server log,
+  which is exactly how a `UnicodeDecodeError` went unexplained for a month. The field index it
+  adds is kept, by rewriting the exception's arguments instead of replacing it.
+- **`click_at` with an empty `points` list reported a click that never happened**, answering
+  `Clicked 0 points at`.
+- **`scroll` launched a browser before rejecting a bad `direction`**, and never rejected it at
+  all on the uid path.
+- **A corrupt `daemon.endpoint` file crashed the proxy** instead of reading as no daemon: the
+  JSON guard caught a bad parse but not a valid parse of the wrong shape.
+
+### Changed
+
+- **The release suite runs on both Python versions this project supports**, 3.12 and 3.13, in
+  parallel and without fail-fast, and the upload still waits for all of it. The 2 have already
+  differed in a way that hid a defect for a whole release, so testing 1 of them was testing
+  half of what people install. `make test-oldest` runs 3.12 locally.
+- **5 assertions that could not fail were replaced**, each replacement proved able to go red by
+  breaking the thing it is about on purpose. The largest was a session-id check satisfied by
+  any non-empty string, the word "Error" included, which left a cookie-persistence claim
+  asserting nothing. Another found that 1 of the 3 channels watching for an unread asyncio
+  error is blind by construction, because pytest's logging plugin takes the record before it
+  reaches the file descriptor being watched. That channel is gone and the reason is written
+  where the claim is.
+- **The `tools/list` budget was re-measured at 22,592 chars**, up 329 from the recorded 22,263.
+  The tool count never moved, so the extra bytes are parameters an earlier release added
+  without re-measuring; the 5 percent margin absorbed it, which is the margin working and also
+  why nobody noticed. The number records what is actually served now.
+- Test guardrails smaller than the product's own budget now import that budget instead of
+  copying a number: a daemon has 10 seconds to tighten its socket and the test waited 2, so a
+  loaded machine could fail a daemon that was still inside its contract.
+- Dead code removed with a per-name search behind each removal: 3 re-exports in the element
+  facade, an unused field left by the endpoint split, and a paging pair on the console monitor
+  no caller ever reached. The atomic advert write, which sets `0o600` on a control channel's
+  address, existed in 2 copies and is 1 now: a security property in 2 places drifts.
+- Two comments stating the opposite of their code were corrected, both in buffer-retirement
+  logic. A comment that lies about a pruning rule is how the defect above comes back.
+
 ## [0.3.4] - 2026-08-06
 
 A release pipeline that runs the tests, a suite that no longer measures the machine, a daemon
@@ -433,7 +518,8 @@ backed by Camoufox, with per-profile session isolation.
 
 - The S3 profile sync stack. Profiles are local-disk only.
 
-[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.0...v0.3.4
 [0.3.0]: https://github.com/agelyhq/mcp-camoufox/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/agelyhq/mcp-camoufox/compare/v0.1.1...v0.2.0
