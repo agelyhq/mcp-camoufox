@@ -20,6 +20,19 @@ if TYPE_CHECKING:
 # local-path route had none.
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
+# How much of one piece of page-written text a message here may echo. Long enough to
+# identify an <option> a human would recognise, short enough that a page cannot size a
+# line the record keeps unredacted.
+MAX_ECHOED_CHARS = 80
+
+# How many of them one message may list. Capping each <option> bounds a label and not the
+# LIST, and a <select> holding thousands of them is a page sizing the line after all: a
+# megabyte message handed to the model and written to the record's ``error``, which
+# nothing truncates. 20 is chosen against the caller this message exists for, someone who
+# mistyped one option and needs to see enough real ones to correct themselves; past that
+# the fix is to read the <select>, not the error.
+MAX_ECHOED_OPTIONS = 20
+
 _TRUE_VALUES = frozenset({"true", "1", "yes", "on", "check", "checked"})
 _FALSE_VALUES = frozenset({"false", "0", "no", "off", "uncheck", "unchecked", ""})
 
@@ -35,17 +48,69 @@ class _Fill:
     clear_first: bool
 
 
-def _match_option(options: list[dict[str, str]], value: str) -> str | None:
-    """Find the option value matching ``value`` by value, then label, then case-insensitively."""
+def _elided(value: str) -> str:
+    """A caller-supplied value's shape, for a message that outlives the call.
+
+    Every message built here is returned to the agent AND written to the telemetry
+    record as its ``error`` and its ``result``, neither of which is redacted: only
+    ``args`` is. This layer cannot tell a search term from a credential — that reads the
+    4 names a field carries and lives in ``tools/_secrets.py``, an outer layer this one
+    may not import — so it never writes a typed value into a message at all. Nothing is
+    lost: the value is already in ``args``, redacted there exactly when it must be, and
+    what makes each failure diagnosable is the rest of the sentence. Same
+    length-preserving shape as the ``<N bytes>`` an elided payload gets.
+    """
+    return f"<{len(value)} chars>"
+
+
+def _match_option(options: list[dict[str, str]], value: str) -> dict[str, str] | None:
+    """The option matching ``value`` exactly by value, then exactly by label, then by
+    label again with case folded.
+
+    The third pass folds the LABEL only: an option's value is an identifier the form
+    submits, and accepting ``READ`` for ``read`` would silently submit something the
+    caller did not name.
+
+    The OPTION rather than its value, because the caller of this needs both halves: the
+    value to apply, and the way the page spells the option, which is the only spelling
+    that may be echoed back (see :func:`_option_name`).
+    """
     for key in ("value", "label"):
         for option in options:
             if option.get(key) == value:
-                return option["value"]
+                return option
     folded = value.casefold()
     for option in options:
         if option.get("label", "").casefold() == folded:
-            return option["value"]
+            return option
     return None
+
+
+def _option_name(option: dict[str, str]) -> str:
+    """How the PAGE spells the option that won: its label, or its value when it has none.
+
+    Capped, because it is page content on its way into a message that is both the tool
+    result and the record's unredacted ``result``: an <option> label has no length limit
+    of its own, and the page cannot be allowed to size a line by writing one. It is not
+    capped in the page instead, where a truncated label would stop matching a caller who
+    named it in full.
+    """
+    return _capped(option.get("label") or option.get("value", ""))
+
+
+def _capped(text: str) -> str:
+    return text if len(text) <= MAX_ECHOED_CHARS else f"{text[:MAX_ECHOED_CHARS]}..."
+
+
+def _available(options: list[dict[str, str]]) -> str:
+    """The options an error is allowed to list, and a count of the ones it did not.
+
+    Same ``... (N more)`` shape the captured-request renderer uses for headers, so a
+    reader meets one elision convention rather than two.
+    """
+    shown = ", ".join(repr(_option_name(o)) for o in options[:MAX_ECHOED_OPTIONS])
+    hidden = len(options) - MAX_ECHOED_OPTIONS
+    return f"{shown} ... ({hidden} more)" if hidden > 0 else shown
 
 
 async def fill_field(
@@ -142,11 +207,18 @@ async def _select_option(request: _Fill) -> str:
         raise ValueError(f"could not read the options of uid '{uid}'")
     matched = _match_option(options, value)
     if matched is None:
-        available = ", ".join(repr(str(o.get("label") or o.get("value"))) for o in options)
-        raise ValueError(f"no option matching '{value}'; available options are {available}")
-    applied = await element_call(page, "selectOption", uid, {"value": matched})
+        raise ValueError(
+            f"no option matches the value given ({_elided(value)}); "
+            f"available options are {_available(options)}"
+        )
+    applied = await element_call(page, "selectOption", uid, {"value": matched["value"]})
     raise_for(applied, uid, op="selectOption")
-    return f"Selected '{value}' in <select>"
+    # The page's spelling of the option that won, never the argument that asked for it:
+    # the case-insensitive branch of _match_option accepts "banana" for "Banana", so
+    # echoing the caller back would put a caller-supplied string into a message that is
+    # also the telemetry ``result``, which redaction never rewrites (see _elided). The
+    # matched label is page content, and it is the more useful of the two anyway.
+    return f"Selected '{_option_name(matched)}' in <select>"
 
 
 async def _set_toggle(request: _Fill) -> str:
@@ -193,5 +265,6 @@ def _parse_toggle(value: str) -> bool:
     if folded in _FALSE_VALUES:
         return False
     raise ValueError(
-        f"'{value}' is not a checkbox state; use one of 'true', 'false', 'checked', 'unchecked'"
+        f"the value given ({_elided(value)}) is not a checkbox state; "
+        f"use one of 'true', 'false', 'checked', 'unchecked'"
     )
