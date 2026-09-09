@@ -45,6 +45,17 @@ start does not hold up the first call of every other client. Closing is bounded 
 step: a tab that stops answering Juggler is abandoned rather than allowed to hang the
 shutdown behind it.
 
+A profile's creation options are resolved once into the frozen `SessionInitOptions` that
+`build_launch_kwargs` reads, and `block_trackers=false` is the only one of them that reaches
+Camoufox as `firefox_user_prefs`: it excludes the bundled uBlock Origin — unioned with
+`CAMOUFOX_BUNDLED_ADDONS`, so neither lever cancels the other — and turns Firefox's own
+tracking-protection and cookie-behaviour preferences off.
+Camoufox's Playwright fork delivers those preferences over Juggler at `Browser.enable`, after
+the browser has started and onto the profile's user branch, not through a pre-launch
+`user.js`, so the category machinery running at `browser-first-window-ready` cannot clear them
+and Firefox writes them into `prefs.js` at shutdown — that profile then keeps tracking
+protection off on every later launch, whatever it passes.
+
 The console and network monitors are one type twice. Both are a `PreservingLog`: a
 bounded ring of the current document's entries, a second ring holding what the previous
 document left behind, and a rotation driven by the tab's own navigations. Only the main

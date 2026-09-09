@@ -34,6 +34,46 @@ All notable changes to this project are documented here. The format follows
   is the only visible name most form fields have. Declared per tool at registration, so the
   wrapper never learns a tool's name; carried from the body to the record through one
   scratch list per call, discarded with it.
+- `block_trackers` on `navigate`, `false` to let tracker requests through. It defaults to
+  `true`, so nothing changes unless you pass it: the default launch is byte-identical to a
+  build that never knew the option, no `exclude_addons` and no `firefox_user_prefs`. It
+  exists because a page's own analytics is sometimes the thing under test — Google
+  Analytics, the Facebook pixel — and until now every profile blocked it with no way to ask
+  otherwise. `false` turns off all 4 protections that can block or neuter such a request:
+  Camoufox's bundled uBlock Origin, via `exclude_addons`; Firefox's Enhanced Tracking
+  Protection, via `privacy.trackingprotection.enabled`, `.annotate_channels`,
+  `.fingerprinting.enabled`, `.cryptomining.enabled`, `.socialtracking.enabled` and
+  `.emailtracking.enabled`; cookie partitioning, via `network.cookie.cookieBehavior=0`,
+  which is what leaves a tracker its identity across sites and which `camoufox.cfg` itself
+  defaults to 4, not 0; and SafeBrowsing, which needs no preference of ours because `camoufox.cfg`
+  already disables all 5 of its `.enabled` toggles on every launch — `blockedURIs`, `downloads`,
+  `passwords`, `malware`, `phishing` — and blanks a 6th key, the Mozilla provider update URL.
+  That browser therefore warns about
+  no malicious page, on any value of the flag, and that price was accepted knowingly. It is
+  a session-creation option like the others: it applies at a profile's first launch and is
+  named in the ignored-options note afterwards. It is a tool parameter and nothing else, no
+  environment variable: `CAMOUFOX_BUNDLED_ADDONS` keeps its own meaning, the server-wide
+  "no extension at all" the marker probes need. The 2 levers are unioned — either one
+  excludes uBlock Origin, neither can cancel the other, and only `block_trackers=false` also
+  sends preferences. This project's own addon is untouched, since a cookie-banner dismisser
+  blocks nothing. One consequence to know before using it: Playwright pushes those
+  preferences onto the profile's user branch after startup, so Firefox writes them into
+  `prefs.js` at shutdown and they stay off for every later launch that sends nothing. Only
+  the uBlock Origin exclusion is per launch. One key was dropped from the set before it ever
+  shipped and must not be re-added: `privacy.partition.network_state`, measured DEAD on the
+  pinned Camoufox 152.0.4-beta.28 build. `camoufox.cfg` line 338 sets it, which is why it
+  looked real, but nothing in the build reads it: `libxul` holds no NUL-terminated copy of
+  the name (only the longer `.connection_with_proxy`), and with that cfg line commented out
+  an int fed to the name through `user.js` survives into `prefs.js` exactly like two
+  invented control names, where the real prefs in the same file — `.serviceWorkers`,
+  `privacy.trackingprotection.enabled`, `network.cookie.cookieBehavior` — all reject the
+  wrong type and vanish. Sending it therefore guaranteed nothing, and it carried a live
+  hazard: an unregistered name takes the type of its first setter, so a bool from us against
+  the cfg's `defaultPref` agrees only by luck, and the disagreeing case aborts browser
+  startup outright (reproduced 3 times, 180 s launch timeout, no Juggler handshake). To
+  re-check after a Firefox major bump: comment out that cfg line, feed the name an int,
+  look for it in `prefs.js`. The cross-site-identity claim is unaffected — it was always
+  carried by `network.cookie.cookieBehavior=0`, which is real and did bite.
 
 ### Changed
 

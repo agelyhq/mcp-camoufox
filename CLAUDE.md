@@ -93,7 +93,9 @@ differentiators, credits), never grows a reference section, and names no other p
   in `docs/architecture.md`. Guarded by `tests/test_no_markers.py`, whose probes
   (`tests/probes.py`) are proved able to detect each signal before asserting its absence,
   refuse a document the parser has not finished, name every mutation's target, and run with
-  no extension at all: Camoufox ships uBlock Origin unless `CAMOUFOX_BUNDLED_ADDONS=false`.
+  no extension at all: Camoufox ships uBlock Origin, excluded only when EITHER
+  `CAMOUFOX_BUNDLED_ADDONS=false` (server-wide, what the probes use) OR a session was created
+  with `block_trackers=false`. The 2 levers are unioned; neither can cancel the other.
 - No `await` in injected JS: `page.evaluate` has no deadline at any layer and a page can
   replace `Promise`. Every op is one synchronous turn, bounded from Python. No file under
   `dom/js/` may name this project: a page hooking `window.eval` reads that source verbatim.
@@ -111,6 +113,11 @@ differentiators, credits), never grows a reference section, and names no other p
 - `humanize` is opt-in and off by default: a missed `hit-renderer` ack wedges a
   process-global dispatch chain with no timeout, measured at 2,004,856 ms in production.
   When set it must reach Camoufox as a **float**: `bool` subclasses `int`, "not a double".
+- `block_trackers=false`, a `navigate` session-creation option, is the ONLY thing that makes
+  this server send `firefox_user_prefs`; it sets no Firefox preference otherwise. Juggler
+  pushes them at `Browser.enable`, after startup, onto the USER branch of a persistent
+  profile, so Firefox keeps them in `prefs.js`: it is a one-way door for that profile, and
+  only its uBO exclusion is per-launch. The 7 measured keys: `launch.py:TRACKER_PREFS_OFF`.
 - `CAMOUFOX_HEADLESS` unset means a visible window (needs desktop GL); `virtual` (Xvfb) is
   the reliable invisible mode, **Linux-only**, and each launch gets its own `env` so the
   modes coexist. `CAMOUFOX_BROWSER_VERSION` pins the build; unset, the launcher chases

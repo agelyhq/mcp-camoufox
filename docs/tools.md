@@ -33,10 +33,18 @@ to the action's result. That is one round trip instead of two.
 
 | Tool | Key parameters | What it does |
 |---|---|---|
-| `navigate` | `profile, url, [fingerprint_os, viewport_width, viewport_height, locale, block_images, block_webrtc, headless], observe?, timeout?` | Loads a URL, creating the session on the first call. The bracketed options apply only when the session is created, and are ignored with a note on an already-running profile. |
+| `navigate` | `profile, url, [fingerprint_os, viewport_width, viewport_height, locale, block_images, block_webrtc, block_trackers, headless], observe?, timeout?` | Loads a URL, creating the session on the first call. The bracketed options apply only when the session is created, and are ignored with a note on an already-running profile. |
 | `reload` | `profile` | Reloads the current page. |
 | `go_back` | `profile` | Back in history. |
 | `wait_for` | `profile, condition, selector?, expression?, return_expression?, timeout?, max_chars?` | Waits for `load`, a `selector`, `network_idle`, or a `predicate` (a JS `expression` polled every 50 ms). On expiry the error reports the last value the expression returned. `return_expression` runs once after a successful wait and its value is appended. |
+
+`block_trackers` defaults to true, which is the browser you get today. Passing false turns
+off everything that can block a tracker request — Camoufox's bundled uBlock Origin,
+Firefox's tracking protection and its cross-site cookie partitioning — so analytics and
+pixel requests go through; SafeBrowsing is off in every Camoufox launch either way, so that
+browser warns you about nothing. Only the uBlock Origin part is per launch: the Firefox
+preferences are written into the profile and stay off for good, so give this a profile
+name of its own.
 
 ## 📑 Tabs
 

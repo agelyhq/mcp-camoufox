@@ -180,6 +180,24 @@ cuts a large amount of ad and tracker traffic out of `list_network_requests`, wh
 noise an agent pays for in tokens on every listing. And blocking is now so common that its
 absence is at least as remarkable as its presence.
 
-The lever exists for the case where a specific site disagrees. The marker test uses it,
-because measuring our own footprint requires a page with nobody else writing to it: uBO's
-3 mutation records were credited to us and blocked a release before that was understood.
+Two levers exist for the case where a specific site disagrees, and neither weakens the
+default. `CAMOUFOX_BUNDLED_ADDONS=false` is server-wide and removes only the bundled addons;
+the marker test uses it, because measuring our own footprint requires a page with nobody else
+writing to it: uBO's 3 mutation records were credited to us and blocked a release before that
+was understood. `navigate`'s `block_trackers=false` is the per-session one, and it goes
+further than uBO: alongside the same exclusion it turns off Firefox's own tracking
+protection and its tracker-cookie behaviour, so a tracker keeps the cross-site identity
+that removing uBO alone would not give it back. The two are unioned, never
+in competition.
+
+Three things that widening does not need, so nobody re-adds them. SafeBrowsing: Camoufox's own
+`camoufox.cfg` already disables all 5 `browser.safebrowsing.*.enabled` toggles it carries —
+`blockedURIs`, `downloads`, `passwords`, `malware`, `phishing` — and blanks a 6th key,
+`browser.safebrowsing.provider.mozilla.updateURL`, on every launch, so a
+`block_trackers=false` session is neither more nor less exposed there than a default one, and
+we ship no pref for it. `browser.contentblocking.category`: Juggler delivers preferences after
+`browser-first-window-ready`, so the category machinery cannot clear ours — measured, on a
+profile already reading `standard` — and the key would only be needed if pref delivery ever
+moved back into a pre-launch `user.js`. And a way back: there is none per profile, because
+those prefs land on the user branch and survive into `prefs.js`, so `block_trackers=false`
+means a dedicated profile name rather than a flag you flip off later.

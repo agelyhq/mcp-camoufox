@@ -74,7 +74,9 @@ and no redefined property to catch. The fingerprint (navigator, screen, WebGL, c
 fonts, audio, timezone, WebRTC) is generated as a coherent whole at launch, which is
 the part that actually matters: a Windows user agent shipping Linux fonts is worse than
 no spoofing at all. Set a proxy and timezone, locale and geolocation follow its exit IP
-instead of contradicting it.
+instead of contradicting it. And when a page needs its own analytics or tracking pixel to
+fire, a profile can be launched with tracker filtering off, uBlock Origin and Firefox's
+tracking protection alike.
 
 **🔑 Sign in once, when you need to.** Every tool takes a `profile` name, and each
 profile is a persistent browser context on disk. For the sites that need an account,
