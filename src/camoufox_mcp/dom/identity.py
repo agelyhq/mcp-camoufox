@@ -45,6 +45,19 @@ class Hit:
     derives it from this declaration, so adding a field here without adding it to
     ``50_geometry.js`` fails loudly on the next resolve instead of quietly arriving as
     ``None``.
+
+    The first block is geometry and dispatch. The second is identity: what the element
+    is, what it is called and what it says, which is what lets the caller record an
+    element a uid will not name in any later document. It is the cheap half of an
+    accessible name by design — see ``identityOf`` in ``25_identity.js`` for what is
+    deliberately not computed here and why — and it is computed only for a caller that
+    passed ``ident=True``, which is the 3 tools whose record names what they acted on
+    (``click``, ``fill``, ``fill_form``). Those 5 fields are empty strings for every
+    other caller.
+
+    ``label`` is the one name a reader wants; ``name_sources`` is every name the element
+    answers to, joined. They are separate because a field labelled "Security code" and
+    named ``cvc`` must stay readable as the first while still being caught by the second.
     """
 
     x: float
@@ -57,6 +70,11 @@ class Hit:
     kind: str
     disabled: bool
     checked: bool | None
+    role: str
+    input_type: str
+    label: str
+    name_sources: str
+    text: str
 
 
 def _hit_from(info: dict[str, Any]) -> Hit:
@@ -95,6 +113,7 @@ async def resolve(
     *,
     scroll: bool = True,
     hit: bool = False,
+    ident: bool = False,
     deadline: float = ACTION_DEADLINE,
 ) -> Hit:
     """Scroll to, measure and classify a uid, waiting for it to settle.
@@ -102,6 +121,12 @@ async def resolve(
     This is what replaces the driver's own actionability retry. A missing element
     fails immediately; a mis-sized, off-screen or covered one is re-probed until the
     budget runs out, then reported with the specific reason.
+
+    ``hit`` and ``ident`` are the two halves nobody pays for by default: the hit test
+    that names what covers the element, and the identity that lets a record say what was
+    acted on. Both are re-run on every poll iteration, so a caller that reads neither —
+    an element screenshot, the second resolve a toggle makes to aim its click — asks for
+    neither. The identity fields of the resulting :class:`Hit` are then empty strings.
     """
     previous: dict[str, Any] | None = None
 
@@ -117,7 +142,9 @@ async def resolve(
         return prev is not None and _same_rect(prev, info)
 
     async def probe() -> Any:
-        return await element_call(page, "resolve", uid, {"scroll": scroll, "hit": hit})
+        return await element_call(
+            page, "resolve", uid, {"scroll": scroll, "hit": hit, "ident": ident}
+        )
 
     try:
         info = await poll_until(probe, accept, deadline=deadline)

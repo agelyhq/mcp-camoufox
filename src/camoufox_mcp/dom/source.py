@@ -10,6 +10,7 @@ _ORDER = (
     "00_boot.js",
     "10_visibility.js",
     "20_names.js",
+    "25_identity.js",
     "30_walk.js",
     "40_selector.js",
     "45_query.js",

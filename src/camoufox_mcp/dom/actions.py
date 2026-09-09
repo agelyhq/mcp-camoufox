@@ -48,14 +48,31 @@ def _match_option(options: list[dict[str, str]], value: str) -> str | None:
     return None
 
 
-async def fill_field(page: ActionablePage, uid: str, value: str, clear_first: bool = True) -> str:
+async def fill_field(
+    page: ActionablePage,
+    uid: str,
+    value: str,
+    clear_first: bool = True,
+    *,
+    on_resolved: Callable[[Hit], None] | None = None,
+) -> str:
     """Set the value of an editable element by uid, dispatching on what it is.
 
     A ``<select>`` picks an option, a checkbox or radio is clicked at its hit-tested
     centre, a colour or range slider takes its value directly, and everything
     editable is focused and typed into with real key events.
+
+    ``on_resolved`` is handed the element the moment it is measured, out of the one
+    ``resolve`` this already makes: a caller that records what it filled neither pays a
+    second page turn for the answer nor waits for success to learn it. Waiting would
+    lose exactly the case that matters, a value typed into a field the fill could not
+    finish, which is the one that must not reach the log in clear.
     """
-    hit = await resolve(page, uid)
+    # The identity is measured only when someone is waiting for it: it is re-read on
+    # every poll iteration, and a fill nobody records has no use for it.
+    hit = await resolve(page, uid, ident=on_resolved is not None)
+    if on_resolved is not None:
+        on_resolved(hit)
     handler = _HANDLERS.get(hit.kind)
     if handler is None:
         # Not a catch-all typed into by default: ``kindOf`` in ``10_visibility.js``

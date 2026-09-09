@@ -19,6 +19,7 @@ from camoufox_mcp.dom.capture import (
     find_elements,
 )
 from camoufox_mcp.dom.identity import (
+    Hit,
     bind_selector,
     locate_many,
     locate_visible,
@@ -42,6 +43,7 @@ __all__ = [
     "ActionablePage",
     "ElementRegistry",
     "EvaluatablePage",
+    "Hit",
     "PollExpiredError",
     "RegistryPage",
     "bind_selector",

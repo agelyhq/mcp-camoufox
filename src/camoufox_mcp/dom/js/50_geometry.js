@@ -67,9 +67,25 @@ function resolveOne(store, a) {
 
   const x = (x0 + x1) / 2;
   const y = (y0 + y1) / 2;
-  // Exactly the fields the Python ``Hit`` declares, and nothing else. An accessible
-  // name used to travel here too: it costs a subtree walk per call, on every click,
-  // every fill and every element screenshot, and no caller ever read it.
+  // Exactly the fields the Python ``Hit`` declares, and nothing else.
+  //
+  // The 5 identity fields are read by the telemetry record, which has to be able to say
+  // WHAT was clicked once the uid that named it is gone. A computed accessible name used
+  // to travel here and was removed: it collects the text of the whole subtree, and this
+  // payload is re-probed until the element settles, so that collection was paid per poll
+  // iteration, on every click, every fill and every element screenshot. `identityOf` is
+  // the cheap half of it — property reads and a sliced `textContent` — plus ONE walk that
+  // is not a property read: the text of the <label> BOUND to the element, which is the
+  // only visible name most form fields have. That one is bounded by the label's own
+  // subtree and skipped outright when `el.labels` is empty, which is why it stays.
+  //
+  // Gated like the hit test for the same reason: `resolve` accepts only after two
+  // consecutive equal rects, so anything computed here is computed at least twice per
+  // action, and the callers that record nothing — an element screenshot, the second
+  // resolve a toggle makes to aim its click — used to pay for an identity they threw
+  // away. Only the 3 tools whose record names what they acted on ask for it: click,
+  // fill and fill_form.
+  const ident = a.ident ? identityOf(el) : NO_IDENT;
   const out = {
     x: x,
     y: y,
@@ -81,6 +97,11 @@ function resolveOne(store, a) {
     kind: kindOf(el),
     disabled: !!el.disabled,
     checked: typeof el.checked === 'boolean' ? el.checked : null,
+    role: ident.role,
+    input_type: ident.input_type,
+    label: ident.label,
+    name_sources: ident.name_sources,
+    text: ident.text,
     intercept: null,
   };
   if (a.hit) out.intercept = hitTest(el, x, y);
