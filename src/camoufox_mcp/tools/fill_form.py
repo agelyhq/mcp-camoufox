@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from camoufox_mcp.dom import fill_field
 from camoufox_mcp.tools._base import get_page, get_session, tool
 from camoufox_mcp.tools._errors import collapse_message, is_unexpected
+from camoufox_mcp.tools._target_notes import note_target, note_when, target_analytics
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 
 
 def register(mcp: FastMCP, deps: ToolDeps) -> None:
-    @tool(mcp, deps)
+    @tool(mcp, deps, analytics=target_analytics)
     async def fill_form(profile: str, fields: list[dict[str, str]]) -> str:
         """Fill several fields in 1 call, each focused, cleared and filled in order.
 
@@ -64,9 +65,14 @@ async def _fill_one(page: ActionablePage, index: int, uid: str, value: str) -> N
     itself does not), and a ``TypeError`` raised while handling the real failure would
     replace the diagnostic with its own. ``raise`` then re-raises the very object,
     class and traceback included.
+
+    Each field notes its own address then its own element, so the record describes the
+    6 fields a 6-field call filled, in the order it filled them, and redacts each value
+    against the field it went into rather than against the call as a whole.
     """
+    note_target(uid=uid)
     try:
-        await fill_field(page, uid, value)
+        await fill_field(page, uid, value, on_resolved=note_when(uid))
     except ValueError as exc:
         if is_unexpected(exc):
             raise

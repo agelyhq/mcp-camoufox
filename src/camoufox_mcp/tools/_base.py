@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from camoufox_mcp.tools._errors import error_detail, format_error, is_unexpected
 from camoufox_mcp.tools._page_line import note_page, page_context_suffix
 from camoufox_mcp.tools._settled_observation import settled_observation
+from camoufox_mcp.tools._target_notes import call_targets
 from camoufox_mcp.tools._telemetry import log_record
 
 if TYPE_CHECKING:
@@ -69,9 +70,11 @@ def tool(
         @tool(mcp, deps)
         async def navigate(profile: str, url: str) -> str: ...
 
-    ``analytics`` is the tool's own telemetry enrichment: a function of the bound
-    arguments returning the extra fields its records carry. Declaring it here is what
-    keeps the wrapper free of any knowledge of individual tools.
+    ``analytics`` is the tool's own telemetry enrichment: a function returning the extra
+    fields its records carry, given the bound arguments. Declaring it here is what keeps
+    the wrapper free of any knowledge of individual tools. A hook that reports on
+    something the body produced reads it from the call's own scratch (``_target_notes``)
+    rather than from a widened signature, because it runs after the body has returned.
     """
 
     def decorator(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
@@ -88,47 +91,89 @@ def _traced(
 ) -> Callable[..., Awaitable[Any]]:
     @functools.wraps(fn)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        start = time.perf_counter()
-        bound = _bind(fn, args, kwargs)
-        profile = bound.get("profile")
-        _seed_page_context(deps, tool_name, profile)
-        ok = True
-        error: str | None = None
-        result: Any = None
-        completed = False
-        try:
-            result = await fn(*args, **kwargs)
-            completed = True
-            result = await _decorate(deps, tool_name, profile, bound, result)
-        except Exception as exc:
-            completed = True
-            ok = False
-            error = error_detail(exc)
-            result = format_error(exc)
-            _log_unexpected(tool_name, profile, exc)
-        finally:
-            if not completed:
-                # Only a BaseException (asyncio.CancelledError, KeyboardInterrupt,
-                # SystemExit) reaches here: the call was aborted, not a success.
-                # Log it as a failure, then let the exception propagate untouched.
-                ok = False
-                error = "cancelled"
-                result = None
-            log_record(
-                deps.telemetry,
-                tool=tool_name,
-                profile=profile,
-                args=bound,
-                url=_active_url(deps, profile),
-                start=start,
-                ok=ok,
-                error=error,
-                result=result,
-                extra=analytics(bound) if analytics else {},
-            )
-        return result
+        # One scratch list per call for whatever the body resolves, opened around both
+        # the body and the record so an analytics hook still sees it. Generic: the
+        # wrapper never reads it, and never learns which tools write to it.
+        with call_targets():
+            return await _timed(deps, tool_name, fn, analytics, args, kwargs)
 
     return wrapper
+
+
+async def _timed(
+    deps: ToolDeps,
+    tool_name: str,
+    fn: Callable[..., Awaitable[Any]],
+    analytics: Callable[[dict[str, Any]], dict[str, Any]] | None,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any:
+    """Run the body, translate its failure, and write the one record it is owed.
+
+    Split from the ``with`` above so the statement that opens the call's scratch wraps a
+    single call: the abort branch of the ``finally`` sat 4 blocks deep otherwise.
+    """
+    start = time.perf_counter()
+    bound = _bind(fn, args, kwargs)
+    profile = bound.get("profile")
+    _seed_page_context(deps, tool_name, profile)
+    ok = True
+    error: str | None = None
+    result: Any = None
+    completed = False
+    try:
+        result = await fn(*args, **kwargs)
+        completed = True
+        result = await _decorate(deps, tool_name, profile, bound, result)
+    except Exception as exc:
+        completed = True
+        ok = False
+        error = error_detail(exc)
+        result = format_error(exc)
+        _log_unexpected(tool_name, profile, exc)
+    finally:
+        if not completed:
+            # Only a BaseException (asyncio.CancelledError, KeyboardInterrupt,
+            # SystemExit) reaches here: the call was aborted, not a success.
+            # Log it as a failure, then let the exception propagate untouched.
+            ok = False
+            error = "cancelled"
+            result = None
+        log_record(
+            deps.telemetry,
+            tool=tool_name,
+            profile=profile,
+            args=bound,
+            url=_active_url(deps, profile),
+            start=start,
+            ok=ok,
+            error=error,
+            result=result,
+            extra=_enrichment(analytics, tool_name, bound),
+        )
+    return result
+
+
+def _enrichment(
+    analytics: Callable[[dict[str, Any]], dict[str, Any]] | None,
+    tool_name: str,
+    bound: dict[str, Any],
+) -> dict[str, Any]:
+    """A tool's own telemetry fields, never at the cost of the call that earned them.
+
+    The hook runs inside the record's ``finally``, where a raise would escape the
+    wrapper and break the one contract every tool has: it never raises out. Each hook is
+    meant to be total, and one of them enforces it in its own body — but "meant to" is a
+    docstring, and this is the seam where being wrong costs a tool result. A failing hook
+    costs its own fields and nothing else, and says so in the server log.
+    """
+    if analytics is None:
+        return {}
+    try:
+        return analytics(bound)
+    except Exception:
+        logger.debug("Analytics hook failed for tool %r", tool_name, exc_info=True)
+        return {}
 
 
 def _seed_page_context(deps: ToolDeps, tool_name: str, profile: Any) -> None:

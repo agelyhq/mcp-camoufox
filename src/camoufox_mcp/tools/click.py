@@ -6,6 +6,7 @@ from camoufox_mcp.dom import resolve
 from camoufox_mcp.tools._base import get_page, get_session, tool
 from camoufox_mcp.tools._observe import ObserveMode, validate_observe
 from camoufox_mcp.tools._target import resolve_target
+from camoufox_mcp.tools._target_notes import note_identity, target_analytics
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 
 
 def register(mcp: FastMCP, deps: ToolDeps) -> None:
-    @tool(mcp, deps)
+    @tool(mcp, deps, analytics=target_analytics)
     async def click(
         profile: str,
         uid: str | None = None,
@@ -35,7 +36,9 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
         page = get_page(session)
         target = await resolve_target(page, uid, selector)
 
-        hit = await resolve(page, target, hit=True)
+        # ``ident`` because the record for this call names the element it clicked.
+        hit = await resolve(page, target, hit=True, ident=True)
+        note_identity(target, hit)
         await page.raw.mouse.click(hit.x, hit.y, click_count=2 if double_click else 1)
 
         verb = "Double-clicked" if double_click else "Clicked"

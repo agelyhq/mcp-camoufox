@@ -6,6 +6,7 @@ from camoufox_mcp.dom import fill_field
 from camoufox_mcp.tools._base import get_page, get_session, tool
 from camoufox_mcp.tools._observe import ObserveMode, validate_observe
 from camoufox_mcp.tools._target import resolve_target
+from camoufox_mcp.tools._target_notes import note_when, target_analytics
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 
 
 def register(mcp: FastMCP, deps: ToolDeps) -> None:
-    @tool(mcp, deps)
+    @tool(mcp, deps, analytics=target_analytics)
     async def fill(
         profile: str,
         uid: str | None = None,
@@ -39,7 +40,7 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
         page = get_page(session)
         target = await resolve_target(page, uid, selector)
 
-        result = await fill_field(page, target, value, clear_first)
+        result = await fill_field(page, target, value, clear_first, on_resolved=note_when(target))
         if selector is not None:
             result += f" via {selector}"
         return result

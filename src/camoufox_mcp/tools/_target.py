@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from camoufox_mcp.dom import bind_selector
+from camoufox_mcp.tools._target_notes import note_target
 
 if TYPE_CHECKING:
     from camoufox_mcp.dom import RegistryPage
@@ -25,8 +26,15 @@ def require_one_target(uid: str | None, selector: str | None) -> None:
 
 
 async def resolve_target(page: RegistryPage, uid: str | None, selector: str | None) -> str:
-    """The uid to act on, binding the selector to one when that is what was given."""
+    """The uid to act on, binding the selector to one when that is what was given.
+
+    The address is noted here, for both arms and before either does any page work, so
+    the record says what a call was aiming at even when nothing matched. What the
+    element turns out to BE is attached later, by the caller holding the hit its own
+    ``resolve`` already measured.
+    """
     require_one_target(uid, selector)
+    note_target(uid=uid, selector=selector)
     if uid is not None:
         return uid
     return await bind_selector(page, str(selector))
