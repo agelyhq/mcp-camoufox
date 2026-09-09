@@ -97,6 +97,17 @@ All notable changes to this project are documented here. The format follows
   joined note. It is still absent from a record with no text at all — a bare image, and a
   call cancelled before it returned — which is what `UsageRecord` has always documented and
   what `docs/telemetry.md` now says instead of claiming the field is always present.
+- **`make build` broke `make test` on the next invocation.** It ran `uv sync --no-dev`
+  against the shared `.venv`, which uninstalls pytest, pytest-timeout, flask and ruff. The
+  damage was not a clean failure: `uv run pytest` finds no pytest in the project
+  environment, falls through to the first one on `PATH`, and collects this repository under
+  a foreign interpreter's site-packages — reported as
+  `ModuleNotFoundError: No module named 'fastmcp.server.providers'` plus two
+  `Unknown config option` warnings for the timeout keys, all of which look like a
+  dependency regression and none of which are. `build` now syncs into its own
+  `.venv-build`, the pattern `test-oldest` already used, and `lint`, `format`, `test` and
+  `test-oldest` each pass `--extra dev` so uv restores anything missing rather than
+  deferring to `PATH`.
 
 ### Security
 

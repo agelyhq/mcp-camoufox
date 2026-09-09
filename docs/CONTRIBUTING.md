@@ -32,7 +32,7 @@ Run both before opening a pull request. They must exit clean.
 
 ```bash
 make lint    # ruff check + ruff format --check
-make test    # CAMOUFOX_HEADLESS=true uv run pytest
+make test    # CAMOUFOX_HEADLESS=true uv run --extra dev pytest
 ```
 
 The test suite drives a real Camoufox browser against a local Flask server serving

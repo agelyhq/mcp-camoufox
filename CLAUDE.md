@@ -133,7 +133,10 @@ differentiators, credits), never grows a reference section, and names no other p
 ## Build / lint / test
 
 `make install`, `make lint` (must exit 0), `make format`, `make test` (real Camoufox plus a
-local Flask, offline), `make run`. The only CI is `.github/workflows/release.yml`: a version
+local Flask, offline), `make run`. `make build` proves the runtime deps install without the
+dev extra, and every target that is not `install` names its environment or its extra: a bare
+`uv sync --no-dev` on the shared `.venv` uninstalls pytest and ruff, after which `uv run`
+runs a PATH binary against foreign site-packages instead of failing. The only CI is `.github/workflows/release.yml`: a version
 tag builds, refuses a tag disagreeing with the built version, runs the WHOLE suite on the
 runner, then publishes through OIDC behind a manual approval. Lint is not in it, it runs
 here. The runner covers **3.12 and 3.13**, both `requires-python` accepts, because a 3.13
