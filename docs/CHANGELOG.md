@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-10
+
+A way to let a page's own trackers through when they are the thing under test, telemetry that
+names what a call addressed while refusing to write down the secret it carried, and a build
+target that stopped stripping the dev dependencies out of the environment everything else runs
+in.
+
 ### Added
 
 - **A record now says WHAT was clicked or filled, not just which uid.** A uid names one
@@ -718,7 +725,8 @@ backed by Camoufox, with per-profile session isolation.
 
 - The S3 profile sync stack. Profiles are local-disk only.
 
-[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.5...v0.4.0
 [0.3.5]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.0...v0.3.4
 [0.3.0]: https://github.com/agelyhq/mcp-camoufox/compare/v0.2.0...v0.3.0
