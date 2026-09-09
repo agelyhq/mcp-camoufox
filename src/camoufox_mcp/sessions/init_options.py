@@ -23,6 +23,7 @@ class SessionInitOptions:
     locale: str | None
     block_images: bool
     block_webrtc: bool
+    block_trackers: bool
     headless: bool | str | None
 
     @classmethod
@@ -36,6 +37,7 @@ class SessionInitOptions:
         locale: str | None = None,
         block_images: bool | None = None,
         block_webrtc: bool | None = None,
+        block_trackers: bool | None = None,
         headless: bool | str | None = None,
     ) -> SessionInitOptions:
         return cls(
@@ -45,5 +47,6 @@ class SessionInitOptions:
             locale=locale or defaults.locale,
             block_images=defaults.block_images if block_images is None else block_images,
             block_webrtc=defaults.block_webrtc if block_webrtc is None else block_webrtc,
+            block_trackers=defaults.block_trackers if block_trackers is None else block_trackers,
             headless=headless,
         )

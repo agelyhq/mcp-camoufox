@@ -13,3 +13,7 @@ class SessionDefaults:
     locale: str | None = None
     block_images: bool = False
     block_webrtc: bool = False
+    # Inverted on purpose: True is today's behaviour (uBlock Origin loaded, Firefox
+    # tracking protection as camoufox ships it). No environment variable feeds it --
+    # CAMOUFOX_BUNDLED_ADDONS is a different lever with a different meaning.
+    block_trackers: bool = True

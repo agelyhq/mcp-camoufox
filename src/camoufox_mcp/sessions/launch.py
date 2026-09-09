@@ -30,6 +30,56 @@ IS_LINUX = sys.platform.startswith("linux")
 # ``humanize:maxTime = true``, which Firefox rejects outright ("Value for key
 # 'humanize:maxTime' is not a double"). Still true of camoufox 0.5.4.
 
+# Every protection that can block or neuter a tracker request, turned off. Sent ONLY when
+# a session is created with ``block_trackers=False``.
+#
+# Measured against camoufox 0.4.11 / Firefox 152.0.4-beta.28 by diffing the profile's
+# ``prefs.js`` after a clean shutdown against a launch that sent nothing: Firefox drops a
+# user value equal to the default, so a key that survives is a key that changed something,
+# and a control key that exists in no build proved that absence means "already at that
+# value" rather than "no such pref". The first 4 bite. The last 3 are already false before we
+# send them, but not from the same source: ``privacy.trackingprotection.enabled`` is turned off
+# by camoufox's own ``camoufox.cfg`` (line 762), while ``.socialtracking.enabled`` and
+# ``.emailtracking.enabled`` appear nowhere in that file and are inert on Firefox's own defaults
+# in this build. All 3 are kept anyway, and the second pair is the weaker guarantee of the two:
+# a vendor config line changes when the vendor changes it, a Firefox default can flip on any
+# Firefox upgrade. Sending them makes the value this server's rather than someone else's.
+#
+# ``privacy.partition.network_state`` is deliberately absent, and must not be re-added from
+# the ``camoufox.cfg`` line that sets it: no code in this build reads that name. ``libxul``
+# holds no NUL-terminated copy of it (only the longer ``.connection_with_proxy``), and an
+# int fed to it through ``user.js`` survives into ``prefs.js`` exactly like an invented
+# name, where every real pref rejects the wrong type. Sending it guarantees nothing; the
+# cross-site identity claim is carried entirely by ``network.cookie.cookieBehavior=0``,
+# which camoufox.cfg defaults to 4, not 0. Worse, an untyped name takes the type of its
+# first setter, and a disagreement with camoufox.cfg's ``defaultPref`` aborts startup:
+# measured, a bool there and an int on the user branch never launches the browser at all.
+#
+# ``browser.contentblocking.category`` is deliberately absent: it is a string
+# ("standard"/"strict"/"custom"), and the machinery that would clear these prefs runs at
+# ``browser-first-window-ready``, BEFORE Playwright's Juggler transport delivers
+# ``firefox_user_prefs`` at ``Browser.enable``. Measured on a profile whose ``prefs.js``
+# already said "standard": all 4 biting prefs survived and the category rewrote itself to
+# "custom". SafeBrowsing is absent for a simpler reason: ``camoufox.cfg`` already disables all
+# 5 of its ``.enabled`` toggles on every launch — ``blockedURIs``, ``downloads``, ``passwords``,
+# ``malware`` and ``phishing``, lines 659-663 — and blanks a 6th key,
+# ``browser.safebrowsing.provider.mozilla.updateURL``, at line 604, so there is nothing left for
+# us to turn off.
+#
+# Consequence documented, not fixed here: Juggler sets these on the USER branch of a
+# persistent profile, so Firefox writes them to ``prefs.js`` at shutdown and they SURVIVE
+# later launches that send nothing. A profile created with ``block_trackers=False`` keeps
+# Firefox's protections off for good; only the uBlock Origin exclusion is per-launch.
+TRACKER_PREFS_OFF: dict[str, Any] = {
+    "network.cookie.cookieBehavior": 0,
+    "privacy.trackingprotection.annotate_channels": False,
+    "privacy.trackingprotection.fingerprinting.enabled": False,
+    "privacy.trackingprotection.cryptomining.enabled": False,
+    "privacy.trackingprotection.enabled": False,
+    "privacy.trackingprotection.socialtracking.enabled": False,
+    "privacy.trackingprotection.emailtracking.enabled": False,
+}
+
 
 def build_launch_kwargs(
     config: ServerConfig,
@@ -44,9 +94,11 @@ def build_launch_kwargs(
     otherwise). ``headless`` uses the per-session override when supplied, else the
     server-wide ``config.headless`` default. ``humanize`` is only sent when
     ``config.humanize`` is set, and ``browser`` only when a build is pinned.
-    ``exclude_addons`` is sent only when ``config.bundled_addons`` is off, and then
-    names every member of Camoufox's own default set rather than one addon, so the
-    setting keeps meaning "none of theirs" if that set ever grows.
+    ``exclude_addons`` is sent when EITHER ``CAMOUFOX_BUNDLED_ADDONS`` is off or the
+    session was created with ``block_trackers=False``, and then names every member of
+    Camoufox's own default set rather than one addon, so the setting keeps meaning
+    "none of theirs" if that set ever grows; ``firefox_user_prefs`` is sent only in the
+    second case, as a fresh copy because Camoufox writes into the mapping it is given.
 
     Never returns ``viewport`` or ``no_viewport``: Camoufox's ``AsyncNewBrowser``
     defaults a window-spoofing persistent context to ``no_viewport=True`` and only
@@ -87,11 +139,22 @@ def build_launch_kwargs(
         kwargs["window"] = (opts.viewport_width, opts.viewport_height)
     if addon_dirs:
         kwargs["addons"] = addon_dirs
-    if not config.bundled_addons:
+    if not config.bundled_addons or not opts.block_trackers:
+        # 2 independent levers, unioned so neither can cancel the other.
+        # CAMOUFOX_BUNDLED_ADDONS=false is the server-wide "no extension at all" the
+        # marker probes need; block_trackers=False is one session asking for a tracker
+        # request to go through. Each is a reason to exclude and neither is ever a
+        # reason to keep, so there is no combination in which one undoes the other.
         # Imported here so camoufox stays out of this module's import, as in Session.create.
         from camoufox.addons import DefaultAddons
 
         kwargs["exclude_addons"] = list(DefaultAddons)
+    if not opts.block_trackers:
+        # A fresh dict per launch: camoufox writes into the mapping it is handed
+        # (`gfx.bundled-fonts.activate`, `permissions.default.image`, the cache prefs),
+        # so passing the constant by reference would let one launch's values accumulate
+        # in it. Every value here is a scalar, so a shallow copy is the whole isolation.
+        kwargs["firefox_user_prefs"] = dict(TRACKER_PREFS_OFF)
     if config.proxy:
         kwargs["proxy"] = config.proxy
     if config.geoip_forced:

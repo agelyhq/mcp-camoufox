@@ -24,6 +24,7 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
         locale: str | None = None,
         block_images: bool | None = None,
         block_webrtc: bool | None = None,
+        block_trackers: bool | None = None,
         headless: str | None = None,
         observe: ObserveMode = "none",
         timeout: int = DEFAULT_TIMEOUT_MS,
@@ -39,6 +40,8 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
             viewport_width: Pixels.
             viewport_height: Pixels.
             locale: e.g. "en-US".
+            block_trackers: Default true. false turns uBlock Origin and Firefox tracking
+                protection off for this profile, for good.
             headless: "true" (invisible), "false" (a real window, needs a desktop GL
                 stack) or "virtual" (invisible via Xvfb, Linux only).
             timeout: Navigation timeout in milliseconds.
@@ -55,6 +58,7 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
             locale=locale,
             block_images=block_images,
             block_webrtc=block_webrtc,
+            block_trackers=block_trackers,
             headless=parse_headless(headless, unset=None),
         )
         supplied = _supplied_names(
@@ -64,6 +68,7 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
             locale=locale,
             block_images=block_images,
             block_webrtc=block_webrtc,
+            block_trackers=block_trackers,
             headless=headless,
         )
 
