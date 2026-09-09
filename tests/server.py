@@ -229,6 +229,21 @@ def api_echo():
     return jsonify({"echo": data, "timestamp": time.time()})
 
 
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    """A sign-in shaped endpoint: it takes credentials and hands back a session.
+
+    Deliberately NOT an echo. The credential has to travel in the request headers and in
+    the request body, which is what ``get_network_request`` renders and what must come
+    back elided; a route repeating it in its response would make that assertion pass or
+    fail on the response body instead.
+    """
+    data = request.get_json(silent=True) or {}
+    answer = jsonify({"ok": bool(data.get("username")), "authenticated": True})
+    answer.set_cookie("session", "s3cr3t-session-value")
+    return answer
+
+
 @app.route("/api/data")
 def api_data():
     return jsonify(
