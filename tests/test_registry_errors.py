@@ -65,12 +65,14 @@ def _hit(kind: str) -> dict[str, Any]:
         "width": 10.0,
         "height": 10.0,
         "tag": "input",
-        "type": "text",
         "kind": kind,
         "disabled": False,
-        "readonly": False,
         "checked": None,
-        "name": "Field",
+        "role": "textbox",
+        "input_type": "text",
+        "label": "Field",
+        "name_sources": "Field",
+        "text": "",
         "intercept": None,
     }
 

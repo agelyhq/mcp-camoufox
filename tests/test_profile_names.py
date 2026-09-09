@@ -70,8 +70,11 @@ async def test_hostile_profile_names_are_rejected_before_touching_disk(
         assert "\n" not in result, f"{case}: error spans several lines"
         assert "is not a valid name" in result, f"{case}: {result!r}"
         assert "letters, digits" in result and "1 to 64" in result, f"{case}: {result!r}"
-        # A 300-char name must not blow the message up: it stays under the 200-char
-        # telemetry note cap, so the error is never logged truncated either.
+        # A 300-char name must not blow the message up. The bound is the message
+        # contract itself, not a cap applied downstream: the sentence is fixed and the
+        # offending name is echoed through `_ECHO_LIMIT` (32 characters), so what a
+        # caller sends can add nothing to the length. 200 is that sentence with room to
+        # spare, and it fails the moment the echo stops being bounded.
         assert len(result) <= 200, f"{case}: error is {len(result)} chars"
 
     # No profile directory and no lock file was created for any of them, and nothing

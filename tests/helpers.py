@@ -7,6 +7,7 @@ for a page or a handle lives in :mod:`tests.fakes`.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 from typing import TYPE_CHECKING
@@ -171,3 +172,16 @@ async def call_within(client: Client, tool: str, args: dict[str, object], budget
     except TimeoutError:
         pytest.fail(f"{tool} did not answer within its {budget:g}s guardrail")
     return tool_text(result)
+
+
+def telemetry_records(log_file: Path) -> list[dict]:
+    """Every record a profile's telemetry log holds, in the order they were written."""
+    lines = [line for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [json.loads(line) for line in lines]
+
+
+def last_telemetry_record(log_file: Path) -> dict:
+    """The record the call just made, asserting the log is not empty."""
+    records = telemetry_records(log_file)
+    assert records, f"telemetry log {log_file} is empty"
+    return records[-1]

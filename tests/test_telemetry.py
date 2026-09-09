@@ -10,23 +10,18 @@ from typing import TYPE_CHECKING
 from fastmcp import Client
 from PIL import Image as PILImage
 
-from tests.helpers import extract_uid, tool_text
+from camoufox_mcp.telemetry import MAX_RESULT_CHARS
+from tests.helpers import (
+    extract_uid,
+    last_telemetry_record,
+    telemetry_records,
+    tool_text,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from fastmcp import FastMCP
-
-
-def _read_records(log_file: Path) -> list[dict]:
-    lines = [line for line in log_file.read_text(encoding="utf-8").splitlines() if line.strip()]
-    return [json.loads(line) for line in lines]
-
-
-def _read_last_record(log_file: Path) -> dict:
-    records = _read_records(log_file)
-    assert records, f"telemetry log {log_file} is empty"
-    return records[-1]
 
 
 async def test_tool_call_appends_jsonl(client: Client, flask_server: str, data_dir: Path) -> None:
@@ -37,7 +32,7 @@ async def test_tool_call_appends_jsonl(client: Client, flask_server: str, data_d
     log_file = data_dir / "logs" / "telem.jsonl"
     assert log_file.exists(), "expected a per-profile telemetry log"
 
-    record = _read_last_record(log_file)
+    record = last_telemetry_record(log_file)
     assert record["profile"] == "telem"
     assert record["tool"] == "navigate"
     assert isinstance(record["args"], dict)
@@ -60,7 +55,7 @@ async def test_tool_call_appends_jsonl(client: Client, flask_server: str, data_d
 async def test_error_call_is_logged(client: Client, data_dir: Path) -> None:
     await client.call_tool("navigate", {"url": "not-a-real-url", "profile": "telem_err"})
 
-    record = _read_last_record(data_dir / "logs" / "telem_err.jsonl")
+    record = last_telemetry_record(data_dir / "logs" / "telem_err.jsonl")
     assert record["tool"] == "navigate"
     assert record["ok"] is False
     # "is not None" accepted "", a dict, or a multi-line Playwright dump. The logged
@@ -73,7 +68,7 @@ async def test_error_call_is_logged(client: Client, data_dir: Path) -> None:
 async def test_profileless_tool_logs_to_server_file(client: Client, data_dir: Path) -> None:
     await client.call_tool("list_sessions", {})
 
-    record = _read_last_record(data_dir / "logs" / "_server.jsonl")
+    record = last_telemetry_record(data_dir / "logs" / "_server.jsonl")
     assert record["tool"] == "list_sessions"
     assert record["profile"] is None
     # A profile-less tool cannot resolve an active page, so the url is null.
@@ -93,7 +88,7 @@ async def test_success_and_intent_enrichment(
     )
     await client.call_tool("navigate", {"url": "not-a-real-url", "profile": profile})
 
-    records = _read_records(data_dir / "logs" / f"{profile}.jsonl")
+    records = telemetry_records(data_dir / "logs" / f"{profile}.jsonl")
     navs = [r for r in records if r["tool"] == "navigate"]
     evals = [r for r in records if r["tool"] == "evaluate"]
 
@@ -103,10 +98,12 @@ async def test_success_and_intent_enrichment(
     assert isinstance(nav_ok["result_chars"], int)
     assert nav_ok["result_chars"] == len(nav_ok["result"])  # short result is not truncated
     assert isinstance(nav_ok["url"], str) and nav_ok["url"].startswith("http")
-    # The intent fields are evaluate-only and must never appear on other tools.
+    # The intent fields are evaluate-only and must never appear on other tools, and
+    # neither may the resolved-target fields of the tools that act on an element.
     assert "intent" not in nav_ok
     assert "script_hash" not in nav_ok
     assert "script_len" not in nav_ok
+    assert "targets" not in nav_ok
 
     # --- evaluate intent analytics: bucket, script fingerprint and length ---
     read_rec = evals[0]
@@ -130,7 +127,11 @@ async def test_success_and_intent_enrichment(
     # The type slot after "Error: " is never the bare "Error" class name.
     match = re.match(r"Error: (\w+): ", note)
     assert match is not None and match.group(1) != "Error"
-    assert len(note) <= 220  # 200-char cap + "...[N chars]" suffix
+    # A one-line error is far under the result ceiling, so it is recorded whole: the
+    # 200-char cap that used to clip this note is gone, and result_chars agreeing with
+    # the note's own length is what proves nothing was cut.
+    assert len(note) < MAX_RESULT_CHARS
+    assert nav_err["result_chars"] == len(note)
     assert isinstance(nav_err["result_chars"], int)
     assert nav_err["error"] is not None and "\n" not in nav_err["error"]
     assert "Call log:" not in nav_err["error"]
@@ -138,7 +139,7 @@ async def test_success_and_intent_enrichment(
 
 async def test_server_start_marker(client: Client, data_dir: Path) -> None:
     """Entering the client runs the lifespan, which logs the server_start marker."""
-    records = _read_records(data_dir / "logs" / "_server.jsonl")
+    records = telemetry_records(data_dir / "logs" / "_server.jsonl")
     starts = [r for r in records if r["tool"] == "server_start"]
     assert len(starts) == 1
     marker = starts[0]
@@ -160,7 +161,7 @@ async def test_session_closed_on_shutdown(
     async with Client(mcp_server) as c:
         await c.call_tool("navigate", {"url": f"{flask_server}/", "profile": "closer"})
 
-    records = _read_records(data_dir / "logs" / "closer.jsonl")
+    records = telemetry_records(data_dir / "logs" / "closer.jsonl")
     closed = [r for r in records if r["tool"] == "session_closed"]
     assert len(closed) == 1
     marker = closed[0]
@@ -183,7 +184,7 @@ async def test_session_closed_on_close_session_tool(
         await c.call_tool("navigate", {"url": f"{flask_server}/", "profile": profile})
         await c.call_tool("close_session", {"profile": profile})
         # Emitted at close time, not deferred to teardown: it is readable already.
-        records = _read_records(data_dir / "logs" / f"{profile}.jsonl")
+        records = telemetry_records(data_dir / "logs" / f"{profile}.jsonl")
         closed = [r for r in records if r["tool"] == "session_closed"]
         assert len(closed) == 1, f"expected 1 session_closed, got {len(closed)}"
         assert closed[0]["args"] == {"reason": "close_session"}
@@ -192,7 +193,7 @@ async def test_session_closed_on_close_session_tool(
 
     # Shutdown must not log a second marker for a session already closed, and closing
     # an idle profile stays silent (the tool answers "nothing to close").
-    records = _read_records(data_dir / "logs" / f"{profile}.jsonl")
+    records = telemetry_records(data_dir / "logs" / f"{profile}.jsonl")
     assert len([r for r in records if r["tool"] == "session_closed"]) == 1
 
 
@@ -200,7 +201,7 @@ async def test_close_session_on_idle_profile_emits_nothing(client: Client, data_
     """No session existed, so no session_closed marker may claim one did."""
     await client.call_tool("close_session", {"profile": "never_live"})
 
-    records = _read_records(data_dir / "logs" / "never_live.jsonl")
+    records = telemetry_records(data_dir / "logs" / "never_live.jsonl")
     assert [r["tool"] for r in records] == ["close_session"]
 
 
@@ -215,7 +216,7 @@ async def test_screenshot_image_metrics(client: Client, flask_server: str, data_
     with PILImage.open(io.BytesIO(png)) as img:
         sent_w, sent_h = img.size
 
-    record = _read_last_record(data_dir / "logs" / "shot.jsonl")
+    record = last_telemetry_record(data_dir / "logs" / "shot.jsonl")
     assert record["tool"] == "screenshot"
     assert record["ok"] is True
     assert (record["img_w"], record["img_h"]) == (sent_w, sent_h)
@@ -242,7 +243,7 @@ async def test_intercepted_click_is_greppable(
 
     await client.call_tool("click", {"profile": profile, "uid": uid})
 
-    record = _read_last_record(data_dir / "logs" / f"{profile}.jsonl")
+    record = last_telemetry_record(data_dir / "logs" / f"{profile}.jsonl")
     assert record["tool"] == "click"
     assert record["ok"] is False
     assert record["error"].startswith("ElementInterceptedError: ")

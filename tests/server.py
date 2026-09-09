@@ -31,6 +31,11 @@ def fill_page():
     return render_template("fill.html")
 
 
+@app.route("/secrets")
+def secrets_page():
+    return render_template("secrets.html")
+
+
 @app.route("/tracker")
 def tracker_page():
     return render_template("tracker.html")
