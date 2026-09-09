@@ -17,9 +17,9 @@ ALLOWED_PROFILE_CHARS = "letters, digits, '.', '_' and '-'"
 # dotfiles, and any name starting with `_` (the reserved telemetry bucket prefix).
 _PROFILE_RE = re.compile(rf"[A-Za-z0-9][A-Za-z0-9._-]{{0,{MAX_PROFILE_LEN - 1}}}")
 
-# How much of a rejected name is echoed back. Small enough that the whole message
-# stays under the 200-char telemetry note cap, so the error is never logged
-# truncated, and so a megabyte-long name cannot produce a megabyte-long line.
+# How much of a rejected name is echoed back, so a megabyte-long name cannot produce a
+# megabyte-long error line. A valid name is at most 64 characters, so half of that is
+# already more than enough for a reader to recognise the one they typed.
 _ECHO_LIMIT = 32
 
 
