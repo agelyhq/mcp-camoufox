@@ -115,18 +115,24 @@ def probe_server(
     )
 
 
-async def extensions_after_closing(client: Client, data_dir: Path) -> list[str]:
+async def extensions_after_closing(
+    client: Client, data_dir: Path, profile: str = PROFILE
+) -> list[str]:
     """Close the session, then read which extensions the browser it ran held.
 
     The close is what makes the answer deterministic, and it is asserted here: a profile
     that was never active would leave an unwritten record reading as a clean browser.
+
+    ``profile`` is a parameter because a matched pair of browsers differing in one
+    session-creation option cannot share a profile name: the option applies at first
+    launch only, so the second arm has to be a second profile.
     """
-    closed = tool_text(await client.call_tool("close_session", {"profile": PROFILE}))
-    assert closed.startswith(f"Closed session '{PROFILE}'"), closed
-    return extensions_the_browser_held(data_dir)
+    closed = tool_text(await client.call_tool("close_session", {"profile": profile}))
+    assert closed.startswith(f"Closed session '{profile}'"), closed
+    return extensions_the_browser_held(data_dir, profile)
 
 
-def extensions_the_browser_held(data_dir: Path) -> list[str]:
+def extensions_the_browser_held(data_dir: Path, profile: str = PROFILE) -> list[str]:
     """The ids of the extensions the browser held, Firefox's own excluded.
 
     Firefox gives every webextension it loads a UUID and records the mapping in the
@@ -143,7 +149,7 @@ def extensions_the_browser_held(data_dir: Path) -> list[str]:
     something. Both records are also required to be non-empty, so a Firefox that stopped
     keeping them fails here instead of reporting a clean browser.
     """
-    profile_dir = data_dir / "profiles" / PROFILE
+    profile_dir = data_dir / "profiles" / profile
     poll_until_sync(
         lambda: bool(_uuid_ids(profile_dir)) and bool(_shipped_ids(profile_dir)),
         deadline=EXTENSION_RECORD_DEADLINE_S,

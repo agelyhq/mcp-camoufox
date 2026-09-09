@@ -31,6 +31,19 @@ def fill_page():
     return render_template("fill.html")
 
 
+@app.route("/tracker")
+def tracker_page():
+    return render_template("tracker.html")
+
+
+# A path uBlock Origin's bundled lists block by filename rather than by domain, which is
+# why it is still blocked when served from 127.0.0.1 (measured 2026-09-09). If upstream
+# lists ever move, tests/test_block_trackers.py names the alternatives.
+@app.route("/fbevents.js")
+def fbevents_js():
+    return app.response_class("window.__tracker_loaded = true;", mimetype="application/javascript")
+
+
 @app.route("/evaluate")
 def evaluate_page():
     return render_template("evaluate.html")

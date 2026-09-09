@@ -16,12 +16,16 @@ def _kwargs(
     monkeypatch: pytest.MonkeyPatch,
     *,
     viewport: tuple[int, int] | None = None,
+    block_trackers: bool | None = None,
+    addon_dirs: list[str] | None = None,
     **env: str,
 ) -> dict[str, Any]:
     """Build the Camoufox launch kwargs an isolated server would use.
 
     ``viewport`` goes through the per-call override rather than ``CAMOUFOX_VIEWPORT``
     because ``isolate_camoufox_env`` clears that variable last, on purpose.
+    ``block_trackers`` goes the same way, and has no variable to go through at all:
+    ``CAMOUFOX_BUNDLED_ADDONS`` is a different lever with a different meaning.
     """
     isolate_camoufox_env(monkeypatch, data_dir, **env)
 
@@ -32,9 +36,12 @@ def _kwargs(
     config = ServerConfig.from_env()
     width, height = viewport or (None, None)
     opts = SessionInitOptions.resolve(
-        config.session_defaults, viewport_width=width, viewport_height=height
+        config.session_defaults,
+        viewport_width=width,
+        viewport_height=height,
+        block_trackers=block_trackers,
     )
-    return build_launch_kwargs(config, opts, data_dir / "profile", [])
+    return build_launch_kwargs(config, opts, data_dir / "profile", addon_dirs or [])
 
 
 def test_launch_env_is_a_private_copy(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -127,6 +134,101 @@ def test_camoufox_bundled_addons_can_be_left_out(
 
     assert kwargs["exclude_addons"] == list(DefaultAddons)
     assert DefaultAddons.UBO in kwargs["exclude_addons"]
+
+
+def test_block_trackers_defaults_to_every_protection_on(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The default launch is byte-identical to a build that never knew about the option.
+
+    ``block_trackers`` is inverted: true is today's behaviour. So the default must not
+    merely be equivalent, it must send neither key at all -- no ``firefox_user_prefs={}``
+    and no ``exclude_addons``, either of which would opt every existing profile into a
+    code path nothing measured before.
+    """
+    monkeypatch.delenv("CAMOUFOX_BUNDLED_ADDONS", raising=False)
+    kwargs = _kwargs(data_dir, monkeypatch)
+
+    assert "exclude_addons" not in kwargs
+    assert "firefox_user_prefs" not in kwargs
+
+
+def test_block_trackers_false_excludes_ubo_and_sends_the_prefs(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One call asking for tracker requests to go through turns off both mechanisms."""
+    from camoufox.addons import DefaultAddons
+
+    from camoufox_mcp.sessions.launch import TRACKER_PREFS_OFF
+
+    monkeypatch.delenv("CAMOUFOX_BUNDLED_ADDONS", raising=False)
+    kwargs = _kwargs(data_dir, monkeypatch, block_trackers=False)
+
+    assert kwargs["exclude_addons"] == list(DefaultAddons)
+    assert kwargs["firefox_user_prefs"] == TRACKER_PREFS_OFF
+
+
+@pytest.mark.parametrize("block_trackers", [True, False])
+def test_the_two_addon_levers_union_instead_of_fighting(
+    block_trackers: bool, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Neither lever can cancel the other, whichever way they are combined.
+
+    ``CAMOUFOX_BUNDLED_ADDONS=false`` is server-wide and means "no bundled extension at
+    all", which is what the marker probes need; ``block_trackers=false`` is one session
+    asking for a tracker request to go through. Each is a reason to exclude uBlock Origin
+    and neither is ever a reason to keep it, so the exclusion is a union -- and only the
+    per-call lever also turns Firefox's own protections off.
+    """
+    from camoufox.addons import DefaultAddons
+
+    kwargs = _kwargs(
+        data_dir,
+        monkeypatch,
+        block_trackers=block_trackers,
+        CAMOUFOX_BUNDLED_ADDONS="false",
+    )
+
+    assert kwargs["exclude_addons"] == list(DefaultAddons)
+    assert ("firefox_user_prefs" in kwargs) is not block_trackers
+
+
+def test_tracker_prefs_are_a_fresh_dict_per_launch(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Camoufox writes into the prefs mapping it is handed, so it must never be shared.
+
+    ``camoufox.utils`` stores ``gfx.bundled-fonts.activate``, ``permissions.default.image``
+    and the cache prefs into the caller's dict. Passing the module constant by reference
+    would let one launch's values accumulate in it and reach every later launch.
+    """
+    from camoufox_mcp.sessions.launch import TRACKER_PREFS_OFF
+
+    before = dict(TRACKER_PREFS_OFF)
+    first = _kwargs(data_dir, monkeypatch, block_trackers=False)["firefox_user_prefs"]
+    second = _kwargs(data_dir, monkeypatch, block_trackers=False)["firefox_user_prefs"]
+
+    assert first is not second
+    assert first is not TRACKER_PREFS_OFF
+
+    first["camoufox.wrote.this"] = True
+    assert before == TRACKER_PREFS_OFF
+    assert "camoufox.wrote.this" not in second
+
+
+def test_our_own_addon_survives_block_trackers(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Excluding Camoufox's bundled set never touches the addons this server installs.
+
+    "I Still Don't Care About Cookies" dismisses cookie banners and blocks nothing, so it
+    has no business being removed by a flag about trackers. It reaches Camoufox through
+    the separate ``addons`` kwarg, and this is that separation asserted.
+    """
+    kwargs = _kwargs(data_dir, monkeypatch, block_trackers=False, addon_dirs=["/tmp/ours"])
+
+    assert kwargs["addons"] == ["/tmp/ours"]
+    assert "exclude_addons" in kwargs
 
 
 def test_browser_build_is_pinned_by_default(

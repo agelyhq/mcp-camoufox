@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Tracker Test{% endblock %}
+{% block content %}
+<h1>Tracker Test</h1>
+<p>
+  This page requests <code>/fbevents.js</code> as a real <code>&lt;script src&gt;</code>, so
+  uBlock Origin sees a request of type <code>script</code> and can block it. The script sets
+  <code>window.__tracker_loaded</code>, which is the page-level evidence that it did not
+  merely arrive but ran.
+</p>
+<script src="/fbevents.js"></script>
+{% endblock %}
