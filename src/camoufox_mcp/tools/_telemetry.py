@@ -20,6 +20,8 @@ from camoufox_mcp.telemetry import (
     truncate_args,
     truncate_note,
 )
+from camoufox_mcp.tools._secrets import redact_args
+from camoufox_mcp.tools._target_notes import noted_targets
 
 if TYPE_CHECKING:
     from camoufox_mcp.telemetry import TelemetryLogger
@@ -43,13 +45,18 @@ def log_record(
     ``args`` is every argument the call actually bound, positional ones included;
     ``extra`` is whatever the tool's own analytics hook added, empty for the tools
     that declared none.
+
+    Arguments are redacted before they are truncated, and against what the call
+    resolved rather than against which tool it was: a value typed into a password field,
+    or into a field that was never found, is replaced by its length, and a 12,000-char
+    one becomes that marker instead of a 10,000-char prefix of itself.
     """
     telemetry.log(
         UsageRecord(
             ts=now_iso(),
             profile=profile,
             tool=tool,
-            args=truncate_args(args),
+            args=truncate_args(redact_args(args, noted_targets())),
             duration_ms=round((time.perf_counter() - start) * 1000, 3),
             ok=ok,
             error=error,
