@@ -4,6 +4,12 @@ from typing import TYPE_CHECKING
 
 from camoufox_mcp.sessions import format_status
 from camoufox_mcp.tools._base import get_page, get_session, tool
+from camoufox_mcp.tools._net_secrets import (
+    CONTENT_TYPE,
+    header_value,
+    redact_header,
+    redact_post_data,
+)
 from camoufox_mcp.tools._text import truncate_chars
 
 if TYPE_CHECKING:
@@ -17,10 +23,16 @@ _RAISE_MAX_BODY = "Raise max_body_size to see more"
 
 
 def _format_headers(headers: dict[str, str]) -> str:
+    """The header block, with the value of an authentication header elided.
+
+    The name and the elided length stay: "the request carried a Cookie of 812 chars" is
+    the whole of what a reader needs, and ``_net_secrets`` argues why the rest must not
+    reach either the model or the log.
+    """
     if not headers:
         return "  <none>"
     items = list(headers.items())[:_HEADER_LIMIT]
-    text = "\n".join(f"  {name}: {value}" for name, value in items)
+    text = "\n".join(f"  {name}: {redact_header(name, value)}" for name, value in items)
     if len(headers) > _HEADER_LIMIT:
         text += f"\n  ... ({len(headers) - _HEADER_LIMIT} more)"
     return text
@@ -57,7 +69,10 @@ def register(mcp: FastMCP, deps: ToolDeps) -> None:
             _format_headers(entry.request_headers),
         ]
         if entry.post_data:
-            lines += ["", "POST data:", entry.post_data]
+            posted = redact_post_data(
+                entry.post_data, header_value(entry.request_headers, CONTENT_TYPE)
+            )
+            lines += ["", "POST data:", posted]
         lines += [
             "",
             "Response headers:",
