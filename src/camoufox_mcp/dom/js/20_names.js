@@ -83,12 +83,12 @@ function labelledByText(el) {
   if (!by) return '';
   const ids = by.split(/\s+/);
   const cover = coverOf(el);
-  const parts = [];
+  let out = '';
   for (let i = 0; i < ids.length; i++) {
     const ref = ids[i] ? GET_BY_ID.call(document, ids[i]) : null;
-    if (ref && !isDataContent(ref)) parts[parts.length] = contentText(ref, cover);
+    if (ref && !isDataContent(ref)) out += (out ? ' ' : '') + contentText(ref, cover);
   }
-  return collapse(parts.join(' '));
+  return collapse(out);
 }
 
 function attributeName(el) {
@@ -115,7 +115,9 @@ function altText(el) {
 function contentText(el, covered) {
   const parts = [];
   collectOwnText(el, covered || NO_COVER, parts);
-  return collapse(parts.join(' '));
+  let out = '';
+  for (let i = 0; i < parts.length; i++) out += (i ? ' ' : '') + parts[i];
+  return collapse(out);
 }
 
 function collectOwnText(el, covered, out) {

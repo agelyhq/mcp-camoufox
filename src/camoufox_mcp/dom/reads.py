@@ -4,6 +4,15 @@ Every script in ``js/reads`` is one synchronous expression returning one record 
 element, with ``ok: false`` when the property does not apply to that element: an
 empty string would be indistinguishable from an empty field. Rendering those records
 is the caller's business; producing them is this module's.
+
+The bundle's own rules apply to these scripts in full — no ``for...of``, no
+``Array.prototype`` method, collect with ``out[out.length] = x`` — and for a stronger
+reason than they apply to ``js/*.js``. A read is compiled by the page's ``Function``
+constructor and runs in the page's global scope, with none of the boot-time built-in
+table in scope, so every name it touches resolves on the page at call time. That is
+more exposed than the bundle, not less: ``value.js`` decides there whether a typed
+password is elided. ``tests/test_dom_layering.py`` scans this directory with the same
+patterns it scans the bundle with.
 """
 
 from __future__ import annotations

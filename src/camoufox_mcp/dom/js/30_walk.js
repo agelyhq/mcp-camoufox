@@ -42,6 +42,26 @@ function pushUnlessName(parts, name, key, value, max) {
   parts[parts.length] = key + '=' + capped(text, max);
 }
 
+// The one value that is never rendered. This string is what an agent reads in a
+// snapshot, what `find` returns, and what a telemetry record keeps as its note, so
+// eliding the value here removes it from all three at once — and none of the three is a
+// place a password belongs, the agent included. The part is still emitted, in the same
+// length-preserving shape a logged value gets, so the field stays obviously a password
+// box that already holds something. The empty string means "not a password", which lets
+// each caller keep its own rule for rendering a value it is allowed to render.
+//
+// The fourth reader of a value is `get_element(prop='value')`, and it states the same
+// rule in `reads/value.js`: a read script is compiled by the Function constructor and so
+// runs in the page's global scope, where nothing declared here is in scope.
+//
+// The type is normalised here rather than by each caller: one arrives IDL-lowercased off
+// `el.type` and the other folds it itself, and a contract that holds for one caller only
+// is not a contract. `value` is a DOMString on both paths, so its `length` is read
+// directly instead of through the page's own `String`.
+function elidedValue(type, value) {
+  return lower(type) === 'password' ? 'value=<redacted ' + value.length + ' chars>' : '';
+}
+
 // What the label reports on behalf of a control the page hides: an operator sees the
 // label, clicks the label, and needs to know what it toggles and where it stands.
 function describeControl(parts, control) {
@@ -51,7 +71,8 @@ function describeControl(parts, control) {
   if (type === 'checkbox' || type === 'radio') {
     parts[parts.length] = control.checked ? 'checked' : 'unchecked';
   } else if (control.value) {
-    parts[parts.length] = 'value=' + capped(collapse(control.value), ATTR_CAP);
+    const elided = elidedValue(type, control.value);
+    parts[parts.length] = elided || 'value=' + capped(collapse(control.value), ATTR_CAP);
   }
   if (control.disabled) parts[parts.length] = 'disabled';
 }
@@ -69,7 +90,9 @@ function getAttributes(el, name, control) {
   }
   if (tag === 'IMG') pushUnlessName(parts, name, 'alt', el.alt, ALT_CAP);
   pushUnlessName(parts, name, 'placeholder', el.placeholder, ATTR_CAP);
-  if (el.name) parts[parts.length] = 'name=' + el.name;
+  // A <form> is [LegacyOverrideBuiltIns]: one holding a control named `name` answers
+  // with that CONTROL, and the line would carry a stringified element.
+  if (typeof el.name === 'string' && el.name) parts[parts.length] = 'name=' + el.name;
   pushUnlessName(parts, name, 'aria-label', el.getAttribute('aria-label'), ATTR_CAP);
 
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
@@ -82,7 +105,9 @@ function getAttributes(el, name, control) {
     if (type === 'checkbox' || type === 'radio') {
       parts[parts.length] = el.checked ? 'checked' : 'unchecked';
     } else if (el.value) {
-      pushUnlessName(parts, name, 'value', el.value, ATTR_CAP);
+      const elided = elidedValue(type, el.value);
+      if (elided) parts[parts.length] = elided;
+      else pushUnlessName(parts, name, 'value', el.value, ATTR_CAP);
     }
   }
   if (tag === 'SELECT' && el.value) {
@@ -92,7 +117,12 @@ function getAttributes(el, name, control) {
   }
   if (el.disabled) parts[parts.length] = 'disabled';
 
-  return parts.length > 0 ? '(' + parts.join(', ') + ')' : '';
+  if (parts.length === 0) return '';
+  // Concatenated in a loop, never `join`: it resolves on the page's own prototype at
+  // call time, so a page that replaces it decides what every rendered line says.
+  let out = '';
+  for (let i = 0; i < parts.length; i++) out += (i ? ', ' : '') + parts[i];
+  return '(' + out + ')';
 }
 
 function renderLine(rec, id, covered) {
@@ -182,14 +212,14 @@ function buildTree(store, a) {
   const covered = new B.Set();
   for (let i = 0; i < shown.length; i++) covered.add(shown[i].el);
 
-  const lines = ['[page] ' + (document.title || '') + ' | ' + location.href];
+  let tree = '[page] ' + (document.title || '') + ' | ' + location.href;
   for (let i = 0; i < shown.length; i++) {
     const rec = shown[i];
-    lines[lines.length] = renderLine(rec, rec.interactive ? mint(store, rec.el) : '', covered);
+    tree += '\n' + renderLine(rec, rec.interactive ? mint(store, rec.el) : '', covered);
   }
   return {
     ok: true,
-    tree: lines.join('\n'),
+    tree: tree,
     totalNodes: total,
     shownNodes: shown.length,
     truncated: total > shown.length,
