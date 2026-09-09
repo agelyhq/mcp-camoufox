@@ -67,7 +67,9 @@ default for local development) because image cost scales with pixel count.
 A value never comes back blank from `get_element`. A property that does not apply raises
 and names the tag, a real but empty value reads `(empty)`, an absent attribute reads
 `(not set)`, and a selector that matched several elements says so rather than hiding the
-ambiguity.
+ambiguity. The one value it will not read back is the content of an
+`<input type="password">`, which answers `<redacted N chars>`: the answer is handed to
+you and kept in the log, and neither is a place a password belongs.
 
 ## 🖱️ Interaction
 
@@ -120,7 +122,7 @@ allowed to return an image.
 | Tool | Key parameters | What it does |
 |---|---|---|
 | `list_network_requests` | `profile, resource_types?, page_size?, page_idx?, include_preserved?` | Paginated request and response log for the active tab. |
-| `get_network_request` | `profile, reqid, include_body?, max_body_size?` | Full headers and body for one request. |
+| `get_network_request` | `profile, reqid, include_body?, max_body_size?` | Full headers and body for one request; credential headers and secret-named POST fields are elided. |
 
 ## 🖥️ Console
 

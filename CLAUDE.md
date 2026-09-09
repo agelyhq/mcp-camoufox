@@ -52,26 +52,25 @@ differentiators, credits), never grows a reference section, and names no other p
 
 ## Conventions
 
-- `config.py` is the only place calling `os.getenv`; everything else reads `deps.config`.
-  Sole exception: `daemon/spawn.py` hands the detached subprocess a copy of the
-  environment, and it re-derives its own `ServerConfig`.
-- Session-creation options apply only at a profile's first launch and are ignored on an
-  active one. `navigate` resolves them into the frozen `SessionInitOptions` that
-  `get_or_create` takes, so no keyword travels untyped.
-- `click`/`fill` take `uid` XOR `selector`, resolved through `tools/_target.py` so the
-  rule and its wording live in 1 place. Both paths converge: a selector is polled until a
-  match is visible, gets a uid, and the uid path takes over.
+- `config.py` is the only caller of `os.getenv`; everything else reads `deps.config`; the lone
+  exception, `daemon/spawn.py`, gives its subprocess an env copy to re-derive a `ServerConfig`.
+- Session-creation options apply at a profile's first launch only; `navigate` resolves them
+  into the frozen `SessionInitOptions` `get_or_create` takes, so no keyword travels untyped.
+- `click`/`fill` take `uid` XOR `selector`, resolved through `tools/_target.py` so the rule and
+  its wording live in 1 place: a selector is polled until visible, gets a uid, and converges.
 - Closed sets of accepted words go through `_errors.validate_choice` before any side effect.
-- `observe` is appended by the `@tool` wrapper, never by a tool body, and capped at 4000
-  chars in both modes so an appendix cannot outweigh the action. `'screenshot'` is
-  deliberately not a mode: it would break the sole-image-tool invariant.
+- `observe` is appended by the `@tool` wrapper, never by a tool body, and capped at 4000 chars
+  in both modes; `'screenshot'` is not a mode: it would break the sole-image-tool invariant.
 - `scroll` uses `window.scrollBy`, not `mouse.wheel`, which is inert on headless Firefox.
 - Two mandated error strings, rendered verbatim by the wrapper: `unknown or stale uid
   '<uid>'; take a new snapshot`, and `ProfileInUseError: profile '<p>' is locked by another
   process`. Profile names are validated before they reach a path: `profile_name.py`.
-- Telemetry is automatic via `@tool`; never log manually. A tool needing more than the
-  shared fields declares a hook at registration rather than the wrapper testing for a name.
-  Reference in `docs/telemetry.md`.
+- Telemetry is automatic via `@tool`; never log manually. A tool needing more than the shared
+  fields declares a hook at registration, not a wrapper name test; `tools/_target_notes.py`
+  caps every string it writes. Only `args` is redacted, so no layer may quote a typed value
+  into a message and a credential is elided where it is RENDERED: a fill value goes when ANY
+  of the field's 4 names looks secret or nothing resolved; `Cookie`/`Authorization` values
+  and secret-named POST fields go in `_net_secrets.py`. Reference: `docs/telemetry.md`.
 
 ## Invariants
 
@@ -98,10 +97,10 @@ differentiators, credits), never grows a reference section, and names no other p
 - No `await` in injected JS: `page.evaluate` has no deadline at any layer and a page can
   replace `Promise`. Every op is one synchronous turn, bounded from Python. No file under
   `dom/js/` may name this project: a page hooking `window.eval` reads that source verbatim.
-- Every built-in the bundle calls is captured in `B` at boot, and no bundle file may use
-  `for...of` or an `Array.prototype` method: both resolve on the page's own prototypes at
-  call time, so a page replacing one counts every element we examine. Collect with
-  `out[out.length] = x`. Keep the `00_boot.js` comment honest about what it does NOT cover.
+- Every built-in the bundle calls is captured in `B` at boot, and no file under `dom/js/` may
+  use `for...of` or an `Array.prototype` method: both resolve on the page's own prototypes at
+  call time, so a page replacing one counts every element we examine and picks what a read
+  returns. Collect with `out[out.length] = x`. Keep `00_boot.js` honest about what it misses.
   Guarded by `tests/test_dom_layering.py` and `tests/test_observability_boundary.py`.
 - A uid names 1 element in 1 tab and 1 document: it survives a re-render there, and any
   other tab or document refuses it. Numbers carry no document order. A closed tab raises

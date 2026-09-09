@@ -6,6 +6,155 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A record now says WHAT was clicked or filled, not just which uid.** A uid names one
+  element in one document, so `uid=e6600005` means nothing to anything reading the log
+  afterwards, and a recipe generated from one could not name the button it was about. The
+  `click`, `fill` and `fill_form` records carry a `targets` list, one entry per element the
+  call ADDRESSED, in the order it addressed them and whether or not it was found: `uid`,
+  the `selector` when that was the address, `tag`, `role`, `input_type`, `label` (the first
+  of aria-label, the bound `<label>`, placeholder and form name that answers), the
+  element's own `text`, and `secret: true` when a value must not be written down for it.
+  An address is noted before any page work, so a stale uid and a selector that matched
+  nothing each still get an entry — what was attempted is what a log is read for, and it is
+  what the value redaction below is keyed on; `resolved` states in as many words whether
+  the address found an element, rather than leaving a reader to infer it from which fields
+  only the page can write. Every string among them is capped at the argument ceiling, since
+  this object is flattened onto the line without passing through the argument truncation
+  and the selector a caller sends and a custom element's `tag` are as long as whoever wrote
+  them makes them; the names the page writes, the `role` attribute included, are capped at
+  80 in the page instead, so a 65,000-character attribute never crosses the protocol at
+  all — once per poll iteration is what it cost before. It costs no extra
+  page call: the fields ride the `resolve` payload that every click and fill already
+  measures, and the accessible-name computation that used to travel there — a walk
+  collecting the whole subtree's text, per poll iteration, on the hottest path in the
+  product — is still not run. One walk is kept and named: the text of the bound `<label>`,
+  bounded by that label's own subtree and skipped for an element that has none, because it
+  is the only visible name most form fields have. Declared per tool at registration, so the
+  wrapper never learns a tool's name; carried from the body to the record through one
+  scratch list per call, discarded with it.
+
+### Changed
+
+- **Tool arguments are kept up to 10,000 characters instead of 200.** Measured over the
+  whole production history: the longest argument string ever recorded is 6,375 characters
+  and the 99th percentile is 906, so the new ceiling keeps 100% of real arguments intact
+  while still bounding a pathological one. The old 200 destroyed 60.4% of every `evaluate`
+  script on disk, which is the single argument these logs are read for. Keeping the entire
+  history untruncated measures 2.2 MB.
+- **Results are kept up to 10,000 characters instead of 200.** Median 84, p95 3,085, p99
+  7,743, max 353,120 (one snapshot): over 99% of results are now recorded whole and only
+  the giant captures are clipped. The `...[N chars]` suffix and `result_chars` keep their
+  meaning exactly. The 2 ceilings are 2 named constants rather than one shared number,
+  because they answer different questions and will diverge.
+
+### Fixed
+
+- **`result_chars` was 1 character short per line of a multi-part result.** It summed the
+  parts while the note it describes joins them with a newline, so a length that is read as
+  "how much was clipped" disagreed with the string it was about. It is now measured on the
+  joined note. It is still absent from a record with no text at all — a bare image, and a
+  call cancelled before it returned — which is what `UsageRecord` has always documented and
+  what `docs/telemetry.md` now says instead of claiming the field is always present.
+
+### Security
+
+- **A password typed into a page was written to disk in clear text.** 573 fill values were
+  on disk unredacted and there was no redaction anywhere in `src/`; a password under 200
+  characters was fully logged. It would have got worse the moment a workflow read these
+  logs to generate a skill, since the secret would have been copied into the generated
+  file. The value of a fill is now replaced by `<redacted N chars>` when the resolved field
+  is an `<input type="password">`, when ANY of the names it carries — aria-label, bound
+  `<label>`, placeholder, form name — or the selector that addressed it matches a short
+  closed list of whole words in English and French, or when the call resolved nothing at
+  all. That last case is the retry an agent makes after a navigation invalidated its uids,
+  which is exactly when a password gets re-typed; the value reached no page, so it is worth
+  nothing to a future recipe while a leak is permanent. All 4 names are tested rather than
+  the one that wins the race to be the recorded `label`, because
+  `<label for="cvc">Security code</label>` hides a `cvc` that nothing else would catch.
+  Redaction runs before truncation, is decided per field (one password in a 6-field form
+  does not cost the other 5 their values), and deliberately does not fire on search terms,
+  filters, dates or discount codes: those are the substance of the log, and `code`, `key`
+  and `pin` are not on the list for that reason — "PIN Code" is the Indian postal code and
+  sits on every shipping form. The residual false positives it does accept are named in
+  `docs/telemetry.md` rather than hidden, along with the field content that still reaches
+  the log by other routes.
+- **A password was rendered in clear text by `snapshot`, by `find`, by the observation
+  a fill appends and by `get_element(prop="value")`.** The walk printed a `value=` part for
+  any input holding a value, the password type included, so
+  `fill(uid=<password>, observe="snapshot")` wrote the secret into `result` at offset 225
+  of the note — redacted out of `args` by the change above and put straight back by the one
+  that raised the result ceiling from 200 to 10,000 characters, which is where that byte
+  used to be cut off. The value of an `<input type="password">` is now elided at every
+  renderer that can reach it, as `<redacted N chars>`: the first 3 share one walk, and the
+  property read answers off its own script in the page, which runs in the page's global
+  scope and so restates the rule rather than sharing it. An agent asking what a password
+  field holds has no more business with the cleartext than the log does. The elision
+  covers both shapes the walk renders: the input's own line, and the description a
+  `<label>` carries on behalf of a control the page hides behind it.
+- **Two ways the secret test could be handed the wrong names.** It reads every name a
+  field carries, joined into one string, and both halves of producing that string were
+  defeasible. The names were capped at 80 characters BEFORE the test saw them, which is
+  the cap the rendered line owes, not the test: "Pour valider la création de votre compte,
+  veuillez confirmer ci-dessous votre mot de passe" says "passe" at offset 85, so the one
+  word making the field a secret was cut off and the password was logged in clear. And the
+  names were assembled with `Array.prototype.join`, which resolves on the page's own
+  prototype at call time: a page replacing it decided what the test read. Both are fixed
+  where they happen — the cap now applies only to the name that is rendered, and every
+  string the bundle builds is concatenated in the index loop that built it — and the
+  source guard that exists to catch the second now covers `join` and every other array
+  method a string does not also carry, which is why it never fired.
+- **The same array-method defect, unguarded, in the read behind
+  `get_element(prop="value")`.** The guard above scanned the top level of `dom/js/` only,
+  so `dom/js/reads/` was outside it — and that is the MORE exposed half, not the less: a
+  read is compiled by the page's own `Function` constructor and runs in the page's global
+  scope, where not even the boot-time built-in table is reachable. `value.js` decided
+  inside `els.map(...)` whether an `<input type="password">` has its value elided, so a
+  page replacing `Array.prototype.map` chose what a security-relevant read returned;
+  `text.js` collected a `<select>`'s selected options with `for...of`, `push` and `join`;
+  `style.js` consulted the computed-style enumeration through
+  `Array.prototype.indexOf.call`. All 6 reads now collect by index into
+  `out[out.length] = x`, the redundant `toLowerCase` on the IDL-lowercased `el.type` is
+  gone, and the guard recurses into the subdirectory. Its banned-method list also grew the
+  6 `Array.prototype` names it was missing (`findLastIndex`, `copyWithin`, `toSorted`,
+  `toReversed`, `toSpliced`, `with`) and now states why `entries`, `keys` and `values` are
+  deliberately not on it.
+- **A fill quoted the value it was given back into its own message.** Redaction
+  rewrites `args`; `result` and `error` are written as the tool produced them, and three
+  messages interpolated the typed text: a `<select>` matching no option, a checkbox handed
+  something that is not a state, and — on the success path — the `Selected '<value>' in
+  <select>` a `<select>` returns. All three are reachable on a field the word list calls
+  a secret — `fill(uid=<select name="token">, value=<credential>)` — so the value redacted
+  out of `args` was written back onto the same line in clear. The 2 refusals name the
+  length instead (`<N chars>`) and keep their diagnosis, the options that do exist and the
+  states that are accepted; the success line now echoes the option the PAGE matched, as the
+  page spells it, which is page content rather than caller input and also tells the reader
+  what was actually picked when the match was case-insensitive. Fixed in `dom/`, which
+  cannot tell a credential from a search term (that test reads the 4 names a field carries
+  and lives a layer out), so it now writes no caller-supplied value into any message at all.
+  The list of options that refusal names is bounded too, at 20 plus a `... (N more)` tail:
+  capping each label at 80 characters bounds a LABEL and not the list, so a `<select>`
+  holding thousands of options was still a page sizing a line that is handed to the model
+  and kept whole as the record's `error`, which nothing truncates.
+- **A captured request handed over the credentials of the profile that made it.**
+  `get_network_request` rendered the raw request and response headers — `Cookie`,
+  `Set-Cookie`, `Authorization`, `Proxy-Authorization` — and the raw POST body straight
+  into its result, which is also the record's `result`. Pre-existing, but this release
+  made it real: the POST section sits after a header block that routinely runs past 200
+  characters, so raising the result ceiling to 10,000 turned a body that was usually cut
+  off before it reached disk into one recorded in full, and a sign-in body carries the very
+  password the redaction above was built to remove. The `Cookie` of a profile signed in by
+  hand is a session credential, and this product's whole premise is that such a profile
+  exists. Those 4 header values are now elided at the renderer — name and
+  `<redacted N chars>` kept, matched without regard to case since Firefox lowercases them —
+  and a POST body loses its credential-looking FIELDS one at a time, judged by name against
+  the same closed word list a typed value is judged by and substituted in place, so every
+  other byte of the payload is rendered exactly as captured. Dropping or truncating the
+  body was rejected: inspecting an API payload is what the tool is for. What is
+  deliberately still rendered whole — an unparseable body shape, the response body, the
+  URL — is named in `docs/telemetry.md` rather than left to be discovered.
+
 ## [0.3.5] - 2026-08-06
 
 What a read-only audit found once 0.3.4 was out. Nothing here was reported by a user, and

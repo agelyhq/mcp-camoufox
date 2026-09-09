@@ -19,11 +19,12 @@ src/camoufox_mcp/
   dom/                 element identity: registry (the handle), identity, capture,
                        actions, waiting (the poll), scripting, errors, source
   dom/js/              numbered bundle concatenated in order: boot, visibility, names,
-                       walk, selector, query, geometry, actions, ops. Never names this
-                       project.
+                       identity, walk, selector, query, geometry, actions, extract, ops.
+                       Never names this project.
   tools/               one file per tool, plus the @tool decorator, telemetry record,
                        error rendering, observation, settled observation, page line,
-                       target resolution and text helpers
+                       target resolution with its per-call notes, secret redaction and
+                       text helpers
   daemon/              optional shared daemon: proxy, spawn, lifecycle, routes, recovery,
                        the endpoint abstraction with its unix and loopback strategies,
                        socket path, identity, auth
@@ -156,7 +157,13 @@ tool's own name from there: the post-action observation an `observe` argument as
 for, then the `[page]` line. A body that appended either would restate a name the
 wrapper already knows, which is how the two drift apart. A tool that needs more in its
 telemetry record declares it at registration (`@tool(mcp, deps, analytics=...)`)
-instead of the wrapper testing for it.
+instead of the wrapper testing for it. A hook runs after the body has returned and is
+handed the bound arguments, so one reporting on something the body produced — which
+element a click resolved — reads it from the call's own scratch list
+(`tools/_target_notes.py`), opened and discarded by the wrapper around every call. Each
+hook is meant to be total, and the wrapper does not take that on trust: it runs inside
+the `finally` that writes the record, where a raise would escape the tool, so a failing
+hook costs its own fields and a debug line, never the call.
 
 ## 🔄 Startup and auto-update
 
