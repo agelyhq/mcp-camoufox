@@ -66,13 +66,22 @@ def summarize_result(result: Any) -> dict[str, Any]:
     Handles a plain ``str``, an ``Image``, or a ``list`` mixing both (screenshot's
     downscale note + image): string parts feed ``result_chars`` and the note, image
     metadata comes from the first ``Image`` found.
+
+    A result with no string part at all carries no ``result_chars``: there is no string
+    for it to be the length of. There are 2 such results, and they are the documented
+    ``None`` cases: a bare ``Image``, and the ``None`` the wrapper passes for a call
+    aborted before it returned anything.
     """
     str_parts, image = _split_result(result)
     fields: dict[str, Any] = {}
     note = ""
     if str_parts:
-        fields["result_chars"] = sum(len(part) for part in str_parts)
-        note = truncate_note("\n".join(str_parts))
+        # Measured on the joined note, joiners included, rather than summed over the
+        # parts: a length that disagrees with the string it describes is a trap for
+        # whoever reads these logs.
+        whole = "\n".join(str_parts)
+        fields["result_chars"] = len(whole)
+        note = truncate_note(whole)
     if image is not None:
         fields.update(_image_fields(image))
         note = f"{note} <Image>".strip() if note else "<Image>"
