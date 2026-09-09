@@ -78,6 +78,30 @@ async def test_value_follows_a_fill_through_a_uid(client: Client, flask_server: 
     assert await _get(client, uid=uid, prop="value") == "Jo"
 
 
+async def test_value_never_reads_a_password_back_in_clear(
+    client: Client, flask_server: str
+) -> None:
+    """The 4th reader of a value, and the last one that used to answer with the password.
+
+    This answer is handed to the model AND kept verbatim as the record's ``result``,
+    which redaction never rewrites — the same reason the snapshot walk elides it. An
+    agent asking what a password field holds has no use for the cleartext, and the
+    length-preserving marker still says the field is filled and by how much.
+    """
+    await open_page(client, f"{flask_server}/secrets", PROFILE)
+    typed = "hunter2read"
+    await client.call_tool(
+        "fill", {"profile": PROFILE, "selector": "#account-password", "value": typed}
+    )
+
+    assert await _get(client, selector="#account-password", prop="value") == (
+        f"<redacted {len(typed)} chars>"
+    )
+    # The rule is the declared type, not the name: the French field beside it says
+    # "mot de passe" and is a text box, and its value is what an agent asked for.
+    assert await _get(client, selector="#fr-secret", prop="value") == "(empty)"
+
+
 async def test_value_on_a_div_names_the_tag(client: Client, flask_server: str) -> None:
     await open_page(client, f"{flask_server}/get-element")
 

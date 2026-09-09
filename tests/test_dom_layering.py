@@ -47,8 +47,41 @@ _SHARED_SIGNALS = (
 _FOR_OF = re.compile(r"\bfor\s*\(\s*(?:const|let|var)\s+\w+\s+of\b")
 # The page's own array methods, called on a value our code owns. ``.push`` on an array
 # we built is still ``Array.prototype.push``, so a page that replaces it gets a tally
-# of every match we collect. Plain index writes (``out[out.length] = x``) do not.
-_ARRAY_METHOD = re.compile(r"\.(push|pop|shift|unshift|filter|map|forEach|sort|some|every)\(")
+# of every match we collect. Plain index writes (``out[out.length] = x``) do not, and a
+# string is concatenated in the same index loop that built it.
+#
+# ``join`` is on this list because it was NOT, and that gap had teeth: the identity walk
+# joined every name a field carries into the single string the secret test reads, so a
+# page replacing ``Array.prototype.join`` could make a French "Mot de passe" field answer
+# a benign string and have the typed password written to the log in clear.
+#
+# The list is meant to be exhaustive over the mutating and collection-producing half of
+# ``Array.prototype``, minus 2 deliberate and named exclusions, so that "the list is
+# short" is never the reason a name is missing:
+#
+# - Names ``String.prototype`` also carries are left out, which is what keeps the list
+#   free of false positives: ``slice``, ``indexOf``, ``lastIndexOf``, ``includes`` and
+#   ``at`` are legitimate and established on the strings this bundle parses (selectors,
+#   text previews), and banning them by name would flag those. Array uses of THOSE are
+#   avoided by convention instead — ``hitTest`` says so where it searches an array by
+#   index. ``concat`` is the one name a string could take that is banned anyway: every
+#   string here is built with ``+``, so a ``.concat(`` in this bundle is an array being
+#   copied through the page.
+# - ``entries``, ``keys`` and ``values`` are left out because the name does not identify
+#   an array method: ``Object.entries(...)`` and the captured ``Map.prototype.entries``
+#   (``B.mapEntries``, reached through ``.call(``) spell the same 7 letters. Their array
+#   forms are only useful with ``for...of`` or a spread, both of which the iterator rule
+#   above already refuses.
+#
+# Everything else is here, including the ES2023 additions: a guard whose contents and
+# whose stated rule disagree is worse than either, and ``findLastIndex``, ``copyWithin``,
+# ``toSorted``, ``toReversed``, ``toSpliced`` and ``with`` were missing while their
+# neighbours were present.
+_ARRAY_METHOD = re.compile(
+    r"\.(join|concat|push|pop|shift|unshift|splice|reverse|fill|flat|flatMap|copyWithin"
+    r"|map|filter|forEach|reduce|reduceRight|sort|some|every|find|findIndex|findLast"
+    r"|findLastIndex|toSorted|toReversed|toSpliced|with)\("
+)
 
 
 def _js(name: str) -> str:
@@ -83,12 +116,20 @@ def test_no_bundle_file_reaches_the_page_through_an_array_or_an_iterator() -> No
     Every file of the bundle is scanned, not a chosen few. The selector path was the
     one exception for a while, and it is the path behind ``find`` and behind every
     selector-bound click and fill, which is exactly where a count is worth having.
+
+    The scan recurses, so ``js/reads/`` is covered too. It was not, and the rules apply
+    there with more force rather than less: a read is compiled by the page's own
+    ``Function`` constructor and runs in the page's global scope, where not even the
+    boot-time built-in table is reachable. What that gap held was the same defect as the
+    ``join`` above — ``value.js`` chose inside ``els.map(...)`` whether a typed password
+    is elided from the model's answer and from the record's ``result``.
     """
-    for path in sorted(_JS_DIR.glob("*.js")):
+    for path in sorted(_JS_DIR.rglob("*.js")):
+        name = path.relative_to(_JS_DIR).as_posix()
         source = path.read_text(encoding="utf-8")
-        assert not _FOR_OF.search(source), f"{path.name} iterates through the page's own protocol"
+        assert not _FOR_OF.search(source), f"{name} iterates through the page's own protocol"
         found = _ARRAY_METHOD.search(source)
-        assert found is None, f"{path.name} calls the page's own {found.group(1)}()"
+        assert found is None, f"{name} calls the page's own {found.group(1)}()"
 
 
 def test_no_tool_addresses_the_element_store_directly() -> None:
