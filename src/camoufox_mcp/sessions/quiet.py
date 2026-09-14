@@ -11,17 +11,35 @@ if TYPE_CHECKING:
 
 
 class _StdioSilencer:
-    """Reference-counted swap of the process streams for a throwaway sink.
+    """Reference-counted swap of the process streams for a throwaway sink, around a launch.
 
-    Camoufox prints its first-launch progress (browser download, GeoIP database)
-    with plain ``print``, from the worker thread ``AsyncNewBrowser`` runs
-    ``launch_options`` in, and exposes no hook to redirect it, so the only lever is
-    the process-global streams. That makes the swap concurrency-sensitive: session
-    creation is locked per profile, so two launches can overlap, and plain nesting
-    corrupts the restore (the inner block hands the outer block's sink back as "the"
-    stdout and the real stream never returns). Counting entries and restoring only
-    what the FIRST one saved keeps that impossible. Nothing here awaits, so the
-    counter cannot be observed half-updated by another task.
+    The 1 place this process assigns ``sys.stdout``/``sys.stderr``, and it is kept
+    because nothing narrower reaches what it silences. ``AsyncNewBrowser`` runs
+    camoufox's ``launch_options`` in a worker thread, and that thread writes with bare
+    ``print`` and a rich ``Console`` that resolve the process streams at call time:
+    ``camoufox_path()`` (reached unconditionally through ``get_path("fonts")``) purges a
+    pre-0.5 cache with "Cleaning old data..." and downloads a build when the active one is
+    unsupported, ``maybe_download_addons`` fetches the bundled addons with a progress bar
+    on a first launch, and ``get_geolocation`` re-downloads the GeoIP database whenever
+    upstream's own ``needs_update()`` says so. None of it is a launch option, a logging
+    level or a driver pipe, and a stray line on fd 1 corrupts the MCP framing, so the
+    swap is the protection here, not the hazard.
+
+    What makes it safe is an ordering invariant: the stdio transport claims fd 1 before
+    any session exists. ``SessionManager`` creates sessions lazily, on the first tool
+    call for a profile, and a tool call can only arrive over a transport that is already
+    running, so the transport already holds its own handle on stdout (a duplicated fd or
+    the captured buffer, depending on the mcp version) when this swap happens and never
+    reads ``sys.stdout`` again. The auto-update path has no such invariant, which is why
+    its fetches run in a child process instead (``updater/child.py``), and why
+    ``tests/test_no_stream_swaps.py`` exempts this file alone.
+
+    The swap is also concurrency-sensitive: session creation is locked per profile, so
+    two launches can overlap, and plain nesting corrupts the restore (the inner block
+    hands the outer block's sink back as "the" stdout and the real stream never
+    returns). Counting entries and restoring only what the FIRST one saved keeps that
+    impossible. Nothing here awaits, so the counter cannot be observed half-updated by
+    another task.
     """
 
     def __init__(self) -> None:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 import sys
 import time
@@ -152,9 +151,9 @@ def _popen_daemon(config: ServerConfig) -> None:
             stdout=log_file,
             stderr=subprocess.STDOUT,
             close_fds=True,
-            # Sanctioned exception to the config.py env rule: the child daemon
-            # re-derives its own ServerConfig from these inherited CAMOUFOX_* vars.
-            env=os.environ.copy(),
+            # The daemon re-derives its own ServerConfig from the inherited CAMOUFOX_*
+            # vars; config.py hands the copy over so it stays the only environ reader.
+            env=config.child_env(),
             **_detach_kwargs(),
         )
     finally:

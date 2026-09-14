@@ -120,6 +120,16 @@ class ServerConfig:
         """
         return dict(os.environ)
 
+    def child_env(self) -> dict[str, str]:
+        """The environment a helper process of this server is spawned with.
+
+        A copy of the whole environment, so the child re-derives its own
+        :class:`ServerConfig` through :meth:`from_env` from the same ``CAMOUFOX_*``
+        variables, and this method stays the only way a subprocess learns them: no
+        spawner reads ``os.environ`` itself. Used by the daemon spawn and the fetch child.
+        """
+        return dict(os.environ)
+
     @property
     def profiles_dir(self) -> Path:
         return self.data_dir / "profiles"

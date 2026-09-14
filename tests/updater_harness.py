@@ -1,16 +1,19 @@
-"""Stand-ins for the camoufox install list, and the traps that keep a start offline.
+"""Stand-ins for the camoufox install list, and the fetchers that keep a start offline.
 
 Shared by :mod:`tests.test_autoupdate` (the download branch) and
 :mod:`tests.test_autoupdate_pin` (the pin and ``CAMOUFOX_BINARY``). Both drive
 ``updater.ensure_browser_present`` for real, so neither may reach the network or rewrite
 the active install on the developer's own machine.
+
+Every fetch the updater performs goes through the ``fetch`` callable its public entry
+points take, the child-process spawner by default. A test hands in one of the fetchers
+here instead: nothing is monkeypatched to keep a start offline.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from camoufox_mcp import updater
 from camoufox_mcp.config import ServerConfig
 from tests.helpers import isolate_camoufox_env
 
@@ -19,11 +22,6 @@ if TYPE_CHECKING:
 
     import pytest
 
-# The 3 entry points that can reach the network. Every "this start downloads nothing"
-# test traps all 3, because trapping only the one it expects to be skipped would pass
-# just as green if the call had moved to a sibling.
-DOWNLOAD_ENTRY_POINTS = ("update_browser", "update_geoip", "install_build")
-
 
 def config_for(data_dir: Path, monkeypatch: pytest.MonkeyPatch, **overrides: str) -> ServerConfig:
     """An isolated config, with ``overrides`` applied as full env var names."""
@@ -31,20 +29,32 @@ def config_for(data_dir: Path, monkeypatch: pytest.MonkeyPatch, **overrides: str
     return ServerConfig.from_env()
 
 
-def forbid_download(*_args: object, **_kwargs: object) -> None:
-    """Stand in for one download entry point, failing the test if it is ever called."""
-    raise AssertionError("download attempted")
+async def forbid_fetch(_config: ServerConfig, asset: str) -> None:
+    """Stand in for the fetch child, failing the test if any asset is ever fetched."""
+    raise AssertionError(f"download attempted: {asset}")
 
 
-def forbid_downloads(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Booby-trap every path to the network, so a start that fetches anything fails.
+class RecordingFetcher:
+    """A fetcher that records the assets it was asked for, in order.
 
-    A plain call rather than a fixture: a test that traps only some of the 3 entry points
-    (because reaching the branch under test requires one of them to run) then reads as a
-    deliberate choice at the top of the body instead of as a missing fixture.
+    ``failing`` names the assets whose fetch raises, the way the child does on a refused
+    network; ``on_browser`` runs when the browser is fetched, so a test can make the
+    install list reflect what the child would have put on disk.
     """
-    for name in DOWNLOAD_ENTRY_POINTS:
-        monkeypatch.setattr(updater, name, forbid_download)
+
+    def __init__(self, *, failing: frozenset[str] = frozenset(), on_browser: Any = None) -> None:
+        self.assets: list[str] = []
+        self.versions: list[str | None] = []
+        self._failing = failing
+        self._on_browser = on_browser
+
+    async def __call__(self, config: ServerConfig, asset: str) -> None:
+        self.assets.append(asset)
+        self.versions.append(config.browser_version)
+        if asset in self._failing:
+            raise RuntimeError(f"{asset} fetch refused")
+        if asset == "browser" and self._on_browser is not None:
+            self._on_browser()
 
 
 def pinned_install(data_dir: Path, *, is_active: bool) -> Any:
@@ -68,13 +78,25 @@ def pinned_install(data_dir: Path, *, is_active: bool) -> Any:
 def only_install_is(monkeypatch: pytest.MonkeyPatch, installed: Any) -> list[str]:
     """Make ``installed`` the machine's whole install list; return what gets activated.
 
-    Only the 2 upstream boundary functions are replaced, so ``binary_present``,
-    ``installed_build`` and ``_activate`` all run for real, and no test rewrites the
-    shared camoufox config on the developer's machine.
+    ``None`` means nothing is installed. Only the 2 upstream boundary functions are
+    replaced, so ``binary_present``, ``installed_build`` and ``activate`` all run for
+    real, and no test rewrites the shared camoufox config on the developer's machine.
     """
     from camoufox import multiversion
 
     activated: list[str] = []
-    monkeypatch.setattr(multiversion, "list_installed", lambda: [installed])
+    make_installed(monkeypatch, installed)
     monkeypatch.setattr(multiversion, "set_active", activated.append)
     return activated
+
+
+def make_installed(monkeypatch: pytest.MonkeyPatch, installed: Any) -> None:
+    """Make the install list report ``installed`` (``None``: nothing) from now on.
+
+    What a fetch child leaves behind, seen from the parent: only the listing changes,
+    so an ``activated`` list handed out earlier keeps recording.
+    """
+    from camoufox import multiversion
+
+    listing = [] if installed is None else [installed]
+    monkeypatch.setattr(multiversion, "list_installed", lambda: listing)

@@ -15,8 +15,7 @@ import pytest
 from camoufox_mcp import updater
 from tests.updater_harness import (
     config_for,
-    forbid_download,
-    forbid_downloads,
+    forbid_fetch,
     only_install_is,
     pinned_install,
 )
@@ -30,18 +29,17 @@ async def test_pinned_build_present_needs_no_download(
 ) -> None:
     """A pin means "do not move": startup must never reach for the network.
 
-    The whole body used to be setup. Booby-trapping the download and then calling the
-    function asserts nothing on its own: a gutted ``ensure_browser_present`` that did
+    The whole body used to be setup. Handing in a fetcher that fails and then calling
+    the function asserts nothing on its own: a gutted ``ensure_browser_present`` that did
     no work at all would pass just as green, and so would a machine where the pinned
     build is missing but some other early return fires. Two things make it real. The
     precondition pins WHY the download is skipped, and
-    ``test_the_no_download_trap_can_actually_fire`` proves the traps can fire at all.
+    ``test_the_no_download_trap_can_actually_fire`` proves the trap can fire at all.
     """
     from camoufox import multiversion
 
     from camoufox_mcp.config import DEFAULT_BROWSER_VERSION
 
-    forbid_downloads(monkeypatch)
     config = config_for(data_dir, monkeypatch, CAMOUFOX_AUTO_UPDATE="true")
 
     # The early return is only meaningful if the pinned build really is installed;
@@ -56,7 +54,7 @@ async def test_pinned_build_present_needs_no_download(
     # developer's machine from a test is not.
     monkeypatch.setattr(multiversion, "set_active", lambda _relative_path: None)
 
-    await updater.ensure_browser_present(config)
+    await updater.ensure_browser_present(config, fetch=forbid_fetch)
 
 
 async def test_the_no_download_trap_can_actually_fire(
@@ -64,15 +62,14 @@ async def test_the_no_download_trap_can_actually_fire(
 ) -> None:
     """Control for the test above: with the build absent, the trap does fire.
 
-    Without this, a trap wired to a function nobody calls would make the no-download
-    test unfalsifiable, which is exactly the failure mode being audited.
+    Without this, a fetcher the start never calls would make the no-download test
+    unfalsifiable, which is exactly the failure mode being audited.
     """
-    forbid_downloads(monkeypatch)
     config = config_for(data_dir, monkeypatch, CAMOUFOX_AUTO_UPDATE="true")
-    monkeypatch.setattr(updater, "binary_present", lambda _config: False)
+    only_install_is(monkeypatch, None)
 
-    with pytest.raises(updater.BrowserSetupError, match="download attempted"):
-        await updater.ensure_browser_present(config)
+    with pytest.raises(updater.BrowserSetupError, match="download attempted: browser"):
+        await updater.ensure_browser_present(config, fetch=forbid_fetch)
 
 
 @pytest.mark.parametrize("auto_update", ["true", "false"])
@@ -88,10 +85,10 @@ async def test_pinned_build_is_activated_on_a_throttled_start(
     whole day: this pins it to every start.
 
     Teeth: the stamp is written first, so the throttle is provably closed (asserted) and
-    the activation cannot be coming from the refresh; the 3 download entry points are
-    booby-trapped, so nothing reaches the network; and only the 2 upstream boundary
-    functions are replaced, so ``binary_present``, ``installed_build`` and ``_activate``
-    all run for real.
+    the activation cannot be coming from the refresh; the fetcher fails on any asset, so
+    nothing reaches the network; and only the 2 upstream boundary functions are
+    replaced, so ``binary_present``, ``installed_build`` and ``activate`` all run for
+    real.
 
     Both values of ``CAMOUFOX_AUTO_UPDATE`` are required to activate. That flag buys the
     user out of network fetches, not out of running the build they pinned, and pointing
@@ -99,10 +96,11 @@ async def test_pinned_build_is_activated_on_a_throttled_start(
     """
     from camoufox_mcp.config import DEFAULT_BROWSER_VERSION
 
-    forbid_downloads(monkeypatch)
     config = config_for(data_dir, monkeypatch, CAMOUFOX_AUTO_UPDATE=auto_update)
     updater.write_update_stamp(config)
-    assert updater.schedule_refresh(config) is None, "the 24h throttle must be closed here"
+    assert updater.schedule_refresh(config, fetch=forbid_fetch) is None, (
+        "the 24h throttle must be closed here"
+    )
 
     installed = pinned_install(data_dir, is_active=False)
     assert installed.version.full_string == DEFAULT_BROWSER_VERSION, (
@@ -110,7 +108,7 @@ async def test_pinned_build_is_activated_on_a_throttled_start(
     )
     activated = only_install_is(monkeypatch, installed)
 
-    await updater.ensure_browser_present(config)
+    await updater.ensure_browser_present(config, fetch=forbid_fetch)
 
     assert activated == [installed.relative_path]
 
@@ -124,11 +122,10 @@ async def test_an_already_active_pin_is_left_alone(
     camoufox config file for no gain, and would make the test above pass even if the
     ``is_active`` check were dropped.
     """
-    forbid_downloads(monkeypatch)
     config = config_for(data_dir, monkeypatch, CAMOUFOX_AUTO_UPDATE="true")
     activated = only_install_is(monkeypatch, pinned_install(data_dir, is_active=True))
 
-    await updater.ensure_browser_present(config)
+    await updater.ensure_browser_present(config, fetch=forbid_fetch)
 
     assert activated == []
 
@@ -150,7 +147,7 @@ async def test_an_explicit_binary_skips_activation(
     )
     activated = only_install_is(monkeypatch, pinned_install(data_dir, is_active=False))
 
-    await updater.ensure_browser_present(config)
+    await updater.ensure_browser_present(config, fetch=forbid_fetch)
 
     assert activated == []
 
@@ -169,19 +166,17 @@ async def test_a_missing_camoufox_binary_is_named_and_activates_nothing(
     that matters.
 
     Teeth: the pinned build is present-but-inactive here, so the old path really did have
-    something to activate, and the fetch and the GeoIP download are trapped so the old
-    path cannot instead pass by failing at the network.
+    something to activate, and every fetch fails so the old path cannot instead pass by
+    failing at the network.
     """
     missing = data_dir / "typo" / "camoufox-bin"
     config = config_for(
         data_dir, monkeypatch, CAMOUFOX_AUTO_UPDATE="true", CAMOUFOX_BINARY=str(missing)
     )
     activated = only_install_is(monkeypatch, pinned_install(data_dir, is_active=False))
-    monkeypatch.setattr(updater, "install_build", forbid_download)
-    monkeypatch.setattr(updater, "update_geoip", forbid_download)
 
     with pytest.raises(updater.BrowserSetupError) as raised:
-        await updater.ensure_browser_present(config)
+        await updater.ensure_browser_present(config, fetch=forbid_fetch)
 
     message = str(raised.value)
     assert str(missing) in message, "the error must name the path that is wrong"
