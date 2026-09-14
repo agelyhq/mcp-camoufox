@@ -1,4 +1,4 @@
-.PHONY: install build lint format test test-oldest run clean
+.PHONY: install build lint format test test-oldest test-latest run clean
 
 install:
 	uv sync --extra dev
@@ -31,9 +31,25 @@ test:
 test-oldest:
 	CAMOUFOX_HEADLESS=true UV_PROJECT_ENVIRONMENT=.venv312 uv run --python 3.12 --extra dev pytest
 
+# The stack `uv tool install` actually resolves, which is NOT the locked one: uv.lock binds
+# only `uv sync`, so a fresh install gets the newest fastmcp/mcp the pyproject bounds allow
+# while the lock stays where it was last written. Before fastmcp was bounded `<4`, the 2
+# stacks ordered startup differently: fastmcp 4 suspends between our lifespan and the stdio
+# read, which is where the 0.4.0 "Connection closed" crash lived, and
+# tests/test_stdio_startup.py was red on that stack with the old updater while passing, bug
+# present, on the locked one. The bound keeps users on 3.x; this target still proves the
+# newest 3.x users actually get (docs/decisions.md names the 6 tests 4 fails). Own
+# environment, filled by `uv pip` because that is the one uv path that neither reads nor
+# writes uv.lock, then run with --no-sync so uv does not "repair" it back to the lock. Only
+# the stdio scenario runs here: it is the test that the locked stack cannot fail.
+test-latest:
+	uv venv --clear .venv-latest
+	uv pip install --python .venv-latest --upgrade -e ".[dev]"
+	CAMOUFOX_HEADLESS=true UV_PROJECT_ENVIRONMENT=.venv-latest uv run --no-sync pytest tests/test_stdio_startup.py
+
 run:
 	uv run mcp-camoufox
 
 clean:
-	rm -rf .venv .venv-build .venv312 build dist *.egg-info .pytest_cache .ruff_cache
+	rm -rf .venv .venv-build .venv312 .venv-latest build dist *.egg-info .pytest_cache .ruff_cache
 	find . -type d -name __pycache__ -exec rm -rf {} +

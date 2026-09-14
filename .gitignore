@@ -8,11 +8,12 @@ dist/
 build/
 *.whl
 
-# Virtual environments: .venv is the working one, the others belong to `make build`
-# and `make test-oldest`, which keep their own so they never disturb it.
+# Virtual environments: .venv is the working one, the others belong to `make build`,
+# `make test-oldest` and `make test-latest`, which keep their own so they never disturb it.
 .venv/
 .venv-build/
 .venv312/
+.venv-latest/
 
 # IDE
 .idea/
