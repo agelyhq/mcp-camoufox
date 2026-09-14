@@ -136,6 +136,39 @@ Leave it unset only if you want that drift.
 
 When bumping any of the 3, bump them consciously and re-run the full E2E suite.
 
+## fastmcp stays below 4 until the suite is green on 4
+
+`pyproject.toml` declares `fastmcp>=3.4.4,<4`, and the upper bound is deliberate. `uv.lock`
+binds only `uv sync`; `uv tool install`, which is how users install, ignores it and resolves
+the pyproject constraints fresh. With fastmcp unbounded above, that resolution shipped
+fastmcp 4.0.3 / mcp 2.2.0 to users on 2026-08-31 while the lock, and so every test run,
+sat on fastmcp 3.4.4 / mcp 1.26.0: an untested major reached users before it reached CI.
+The bound makes the installed stack the tested one. Release 0.4.1 ships fastmcp 3.4.4 /
+mcp 1.26.0, unchanged.
+
+The full suite measured on fastmcp 4.0.3 / mcp 2.2.0 fails 6 tests, none environmental:
+
+- `tests/test_daemon.py`, `tests/test_daemon_advert.py`, `tests/test_daemon_recovery.py`
+  and `tests/test_daemon_socket_path.py` fail at collection: mcp 2.2.0 depends on `httpx2`
+  (module `httpx2`), so `httpx` is no longer installed transitively, and
+  `daemon/spawn.py`, `daemon/endpoint_loopback.py`, `daemon/recovery.py` and
+  `daemon/endpoint.py` import it directly. That import was never declared in
+  `pyproject.toml`; the opt-in daemon only worked because httpx 0.28.1 arrived through
+  fastmcp 3.
+- `tests/test_tool_payload.py::test_server_instructions_are_served` and
+  `tests/test_tool_payload.py::test_the_observe_bullet_states_the_cost_not_only_the_win`
+  assert on `client.initialize_result`, which the fastmcp 4 `Client` leaves `None` in its
+  default `auto` mode. The wire initialize result still carries the 2,629-character
+  instructions, and `client.instructions` exposes them, so the doctrine is served: the
+  test reads a field the new client no longer populates.
+
+**Follow-up, "fastmcp 4 migration"**: move the daemon's HTTP client to what mcp 2 ships
+(or declare the client it needs, as pydantic is declared, never rely on a transitive
+again), read instructions through the fastmcp 4 client API in the 2 payload tests, run the
+whole suite on the new stack on 3.12 and 3.13, then raise the bound to `<5` and re-lock in
+the same change. Until that lands, `make test-latest` proves the newest 3.x users get, and
+`fastmcp<4` is not a pin to relax casually.
+
 ## stdio only
 
 The client-facing transport is stdio. The server is spawned as a subprocess by an MCP

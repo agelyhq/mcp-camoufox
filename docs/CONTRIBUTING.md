@@ -35,6 +35,11 @@ make lint    # ruff check + ruff format --check
 make test    # CAMOUFOX_HEADLESS=true uv run --extra dev pytest
 ```
 
+A change near startup or the stdio transport also needs `make test-latest`: it runs the
+stdio startup scenario on the newest fastmcp/mcp the bounds allow, the resolution
+`uv tool install` gives users, which is not what `uv.lock` holds and orders startup
+differently.
+
 The test suite drives a real Camoufox browser against a local Flask server serving
 `tests/templates/*.html`. Nothing browser-side is mocked and no internet access is
 needed. On Linux you can also run it with `CAMOUFOX_HEADLESS=virtual` to exercise the

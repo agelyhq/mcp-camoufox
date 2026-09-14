@@ -17,7 +17,7 @@ must survive that project's maintainer reading it.
 ## Architecture
 
 `src/camoufox_mcp/`: `server.py` (entrypoint), `bootstrap.py` (composition root, holds
-`SERVER_INSTRUCTIONS`), `config.py` (the only reader of `os.environ`), `updater.py`,
+`SERVER_INSTRUCTIONS`), `config.py` (the only reader of `os.environ`), `updater/`,
 `telemetry.py`, `profile_name.py`, `deadlines.py` (`bounded()`), then `sessions/`, `dom/`
 with its numbered `dom/js/` bundle, `tools/` (one file per tool), and the opt-in
 `daemon/`. File-by-file map in `docs/architecture.md`.
@@ -52,8 +52,9 @@ differentiators, credits), never grows a reference section, and names no other p
 
 ## Conventions
 
-- `config.py` is the only caller of `os.getenv`; everything else reads `deps.config`; the lone
-  exception, `daemon/spawn.py`, gives its subprocess an env copy to re-derive a `ServerConfig`.
+- `config.py` is the only reader of `os.environ`; everything else reads `deps.config`. A
+  subprocess (the daemon, the fetch child) gets `config.child_env()`, a copy it re-derives its
+  own `ServerConfig` from, so no spawner reads the environment itself.
 - Session-creation options apply at a profile's first launch only; `navigate` resolves them
   into the frozen `SessionInitOptions` `get_or_create` takes, so no keyword travels untyped.
 - `click`/`fill` take `uid` XOR `selector`, resolved through `tools/_target.py` so the rule and
@@ -109,7 +110,18 @@ differentiators, credits), never grows a reference section, and names no other p
   `TargetClosedError`, never the stale-uid string.
 - `dom/` takes any page-protocol object, importing neither `sessions/` types nor Playwright.
 - Startup auto-update is fail-open AND non-blocking: only a cold install blocks, the version
-  check runs in a background task throttled to 24h, and never writes inside site-packages.
+  check runs in a background task throttled by a 24h stamp that only a completed refresh
+  writes, and never writes inside site-packages. Every fetch runs in a child process
+  (`updater/child.py` spawns `python -m camoufox_mcp.updater.fetch`, stdin and stdout on the
+  null device, a bounded stderr tail as the failure message); the parent keeps the offline
+  half (disk reads, activating the pin, the stamp) and terminates the child on shutdown.
+- **This process never assigns `sys.stdout` or `sys.stderr`.** A redirect is process-global
+  whichever thread enters it, and fastmcp 4 suspends between our lifespan's `yield` and the
+  stdio transport's claim on fd 1: a refresh that swapped the streams from a worker thread in
+  that window handed mcp a `StringIO`, and every fresh install died before `initialize` was
+  answered. Guarded by `tests/test_no_stream_swaps.py`, whose single exemption is
+  `sessions/quiet.py`, around a launch, safe because a session can only be created by a tool
+  call, which can only arrive over a transport that already owns fd 1.
 - `humanize` is opt-in and off by default: a missed `hit-renderer` ack wedges a
   process-global dispatch chain with no timeout, measured at 2,004,856 ms in production.
   When set it must reach Camoufox as a **float**: `bool` subclasses `int`, "not a double".
@@ -141,7 +153,11 @@ tag builds, refuses a tag disagreeing with the built version, runs the WHOLE sui
 runner, then publishes through OIDC behind a manual approval. Lint is not in it, it runs
 here. The runner covers **3.12 and 3.13**, both `requires-python` accepts, because a 3.13
 stdlib behaviour once satisfied an assertion our own code owed; `make test-oldest` runs 3.12
-locally. **No test may wait a duration before asserting**: wait for the
+locally. `make test-latest` (also in `release.yml`) runs `tests/test_stdio_startup.py` on the
+UNLOCKED resolution `uv tool install` gives users: `uv.lock` binds only `uv sync`, fastmcp is
+unbounded above, and the 0.4.0 stdio crash reproduced only on fastmcp 4 / mcp 2 while the
+locked 3.4.4 / 1.26 stack passed with the bug present. A relock below fastmcp 4 does not
+retire that target. **No test may wait a duration before asserting**: wait for the
 appearance, deadline as guardrail, via `tests/waits.py:poll_until`. Shared test code lives
 only in `tests/`; `tools/list` is budgeted in `tests/payload_baseline.json`.
 

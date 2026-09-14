@@ -10,7 +10,10 @@ src/camoufox_mcp/
   config.py            the only module that reads os.environ; frozen ServerConfig
   proxy_url.py         both directions of a proxy URL: parsing and redaction, in 1 place
   session_defaults.py  frozen dataclass of per-session creation options
-  updater.py           throttled, non-blocking, fail-open auto-update
+  updater/             throttled, non-blocking, fail-open auto-update: startup (the cold
+                       install, the pin, the refresh), builds (what is on disk, offline),
+                       child (spawns the fetch in a subprocess), fetch (that subprocess's
+                       entry), errors
   telemetry.py         per-profile JSONL logger (+ telemetry_intent.py for evaluate)
   profile_name.py      the filename-safe rule, imported by both consumers of a name
   deadlines.py         bounded(): the one way to await a Playwright call under a clock
@@ -180,8 +183,24 @@ hook costs its own fields and a debug line, never the call.
 
 Fail-open and non-blocking. `ensure_browser_present` blocks only on a cold install
 where there is no binary at all. The version check and refresh run in a background
-task, throttled to once per 24 hours through a stamp file, so concurrent server starts
-never queue behind a GitHub request and a network failure never prevents startup.
+task, throttled to once per 24 hours through a stamp file that only a completed refresh
+writes, so concurrent server starts never queue behind a GitHub request and a network
+failure never prevents startup.
+
+Every fetch runs in a child process: `python -m camoufox_mcp.updater.fetch <browser|geoip>`,
+spawned with a copy of the environment (`ServerConfig.child_env`) so it re-derives the same
+config, its stdin and stdout on the null device and a bounded tail of its stderr kept as
+the failure message, which the parent appends to the server log. Camoufox reports download
+progress with plain `print` and rich against the live process streams, and this process
+never assigns `sys.stdout` or `sys.stderr`: a redirect is process-global whichever thread
+enters it, and fastmcp 4 suspends between our lifespan's `yield` and the stdio transport's
+claim on fd 1, so a refresh that swapped the streams in that window handed the transport a
+`StringIO` and the server died before its first reply. The parent keeps the local half:
+reading the `browsers/` tree, activating the pinned build (a config write), the stamp.
+Cancelling the refresh at shutdown terminates the child under a deadline, so a black-holed
+download never holds the exit. The only remaining stream swap is `sessions/quiet.py`,
+around a browser launch, which is safe because the transport holds its own handle on fd 1
+before any session can exist; `tests/test_no_stream_swaps.py` guards both facts.
 
 ## 🧪 Testing
 
