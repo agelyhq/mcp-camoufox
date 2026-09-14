@@ -6,6 +6,61 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-15
+
+A fresh install answers its first request again: the startup crash under fastmcp 4 / mcp 2
+is fixed at its root, this process never touches the process-global streams any more, the
+scenario that reproduces it runs in CI on the stack users actually install, and the
+dependency policy stops letting an untested major reach users before it reaches the suite.
+
+### Fixed
+
+- **Startup crash on a fresh install under fastmcp>=4 / mcp>=2.** Every start died before
+  `initialize` was answered, the host reporting "Connection closed" and the server log
+  `AttributeError: '_io.StringIO' object has no attribute 'buffer'` from
+  `mcp/server/stdio.py`. Root cause: the auto-updater ran camoufox's downloads under a
+  process-global `sys.stdout`/`sys.stderr` redirect, entered from a worker thread, to keep
+  the download's progress output off the wire; fastmcp 4 suspends between our lifespan's
+  `yield` and the stdio transport's claim on fd 1, so a refresh that was due at that moment
+  handed the transport a `StringIO` instead of the real stream. The stamp that throttles
+  the refresh is written only by a completed one, so a crashed start re-armed the race on
+  every restart. The fix: every fetch now runs in a child process
+  (`python -m camoufox_mcp.updater.fetch <browser|geoip>`, spawned by `updater/child.py`
+  with stdin and stdout on the null device and a bounded stderr tail as the failure
+  message), the parent keeps the offline half (disk reads, activating the pin, the stamp)
+  and terminates the child under a deadline at shutdown, and this process never assigns
+  `sys.stdout` or `sys.stderr`: `tests/test_no_stream_swaps.py` reads the source to prove
+  it, with `sessions/quiet.py` as the single exemption, safe because a session can only be
+  created by a tool call, which can only arrive over a transport that already owns fd 1.
+  `tests/test_stdio_startup.py` drives the real entry point over a real stdio transport
+  with an empty data dir, the one scenario the in-process suite could not see; it is red on
+  the pre-fix updater under fastmcp 4 and runs in `release.yml` through `make test-latest`,
+  on the unlocked resolution `uv tool install` gives users, because the locked stack passes
+  it with the bug present.
+- A failed refresh no longer writes the 24h stamp, so a missing asset is retried at the
+  next start instead of parked behind the throttle; the failure is one line in the server
+  log, the child's own error rather than a traceback.
+
+### Changed
+
+- **Dependency policy: `fastmcp>=3.4.4,<4`.** `uv.lock` binds only `uv sync`; `uv tool
+  install`, which is how users install, ignores it and resolves the pyproject bounds
+  fresh. Unbounded above, that resolution shipped fastmcp 4.0.3 / mcp 2.2.0 to users on
+  2026-08-31 while the lock, and so every test run, sat on fastmcp 3.4.4 / mcp 1.26.0: an
+  untested major reached users before it reached CI. The upper bound makes the installed
+  stack the tested one; the lock stays at fastmcp 3.4.4 / mcp 1.26.0, unchanged. The full
+  suite measured on fastmcp 4 fails 6 tests, none environmental (the daemon's undeclared
+  `httpx` import and 2 payload tests reading a client field the new client no longer
+  populates); `docs/decisions.md` records them and the migration that has to land before
+  the bound moves.
+- `make test-latest` (new, also in `release.yml` after the full suite on both matrix
+  legs) builds its own `.venv-latest` through `uv pip`, the one uv path that neither reads
+  nor writes `uv.lock`, and runs `tests/test_stdio_startup.py` on the newest fastmcp/mcp
+  the bounds allow with `--no-sync`, so uv cannot repair the environment back to the lock.
+- `ServerConfig.child_env()` is the one way a subprocess (the daemon, the fetch child)
+  learns its environment; `daemon/spawn.py` no longer reads `os.environ` itself, so
+  `config.py` is the only reader again with no sanctioned exception.
+
 ## [0.4.0] - 2026-09-10
 
 A way to let a page's own trackers through when they are the thing under test, telemetry that
@@ -725,7 +780,8 @@ backed by Camoufox, with per-profile session isolation.
 
 - The S3 profile sync stack. Profiles are local-disk only.
 
-[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.5...v0.4.0
 [0.3.5]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.0...v0.3.4
