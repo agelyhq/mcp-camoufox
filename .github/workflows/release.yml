@@ -151,6 +151,13 @@ jobs:
           TEST_FLASK_PORT: "5123"
         run: uv run pytest -q
 
+      # The suite above runs on uv.lock, but `uv tool install` never reads the lock: it
+      # resolves the newest fastmcp/mcp the bounds allow, and that stack orders startup
+      # differently. The 0.4.0 stdio crash reproduced only there and passed the locked
+      # suite, so the stdio startup scenario is run a second time on the stack users get.
+      - name: Stdio startup on the stack `uv tool install` resolves
+        run: make test-latest
+
   publish:
     name: Publish to PyPI
     needs: verify
