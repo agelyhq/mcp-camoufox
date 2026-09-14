@@ -21,7 +21,11 @@ classifiers = [
     "Topic :: Software Development :: Testing",
 ]
 dependencies = [
-    "fastmcp>=3.4.4",
+    # Bounded below the next major because `uv tool install` ignores uv.lock and resolves
+    # these constraints fresh: unbounded, it shipped fastmcp 4.0.3 / mcp 2.2.0 to users on
+    # 2026-08-31 while the lock, and so the suite, sat on 3.4.4 / 1.26.0. That stack fails
+    # 6 tests here (docs/decisions.md, "fastmcp stays below 4 until the suite is green on 4").
+    "fastmcp>=3.4.4,<4",
     # camoufox and playwright are bounded together because the Camoufox pin does NOT
     # bound the browser: the launcher resolves the newest GitHub browser release whose
     # release ordinal matches, not a Firefox version, so the binary drifts forward on
