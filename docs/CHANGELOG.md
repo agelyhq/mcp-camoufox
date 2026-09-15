@@ -6,6 +6,43 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-09-15
+
+The release pipeline publishes again, and 3 findings from the 0.4.1 review are closed: the
+fetch child can no longer hold a shutdown, the guard against a process-global stream swap
+reads the syntax tree instead of the text, and the fetch child's docstring says what it
+really does to the active build.
+
+### Fixed
+
+- **Neither 0.4.0 nor 0.4.1 ever reached PyPI.** `release.yml` checked the wheel's
+  `Metadata-Version` as the literal text `2.4`; uv's build backend moved to 2.5 (uv 0.11),
+  so the "Check the metadata" step refused both tags after `twine check --strict` had
+  passed them, and PyPI stayed on 0.3.x. The version is now parsed and required to be
+  2.4 or newer, which is what PEP 639's `License-Expression` actually needs.
+- **A cancelled fetch could hang the shutdown.** asyncio resolves `Process.wait()` only
+  once every pipe has reported EOF, and a `StreamReader` holding more than 128 KiB unread
+  pauses its pipe, so a fetch child that printed a backlog after the parent stopped
+  reading, then died, left `updater/child.py` awaiting an exit it could never observe:
+  the terminate deadline expired, and the wait after `kill()` had no deadline at all.
+  Terminating now drains stderr while it waits, and every step of the path is bounded
+  (`TERMINATE_TIMEOUT_S`, then `KILL_TIMEOUT_S`, then a logged warning rather than a
+  hang). `tests/test_fetch_child_teardown.py` drives the real child into that backlog
+  through the environment it inherits and waits for the cancellation to complete.
+- The fetch child's module docstring no longer claims it never activates a build:
+  camoufox's `install_versioned` calls `set_active` on every install. Unpinned, that
+  activation stands; pinned, the parent re-asserts the pin after every browser fetch.
+
+### Changed
+
+- `tests/test_no_stream_swaps.py` parses each source file with `ast` instead of matching
+  5 substrings per line. It now catches `setattr(sys, ...)`, annotated, augmented and
+  tuple targets, `with ... as sys.stdout`, `del`, writes into `vars(sys)` or
+  `sys.__dict__`, `sys` imported under another name, and `contextlib.redirect_stdout` /
+  `redirect_stderr` under any import alias; a docstring naming the swap is no longer a
+  hit. Every spelling has a control proving it is detected, and every read a control
+  proving it is not.
+
 ## [0.4.1] - 2026-09-15
 
 A fresh install answers its first request again: the startup crash under fastmcp 4 / mcp 2
@@ -780,7 +817,8 @@ backed by Camoufox, with per-profile session isolation.
 
 - The S3 profile sync stack. Profiles are local-disk only.
 
-[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.5...v0.4.0
 [0.3.5]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.4...v0.3.5
