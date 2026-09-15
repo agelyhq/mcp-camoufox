@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import subprocess
 import sys
 from typing import TYPE_CHECKING
@@ -32,12 +33,17 @@ if TYPE_CHECKING:
 
     Fetcher = Callable[[ServerConfig, FetchAsset], Awaitable[None]]
 
+logger = logging.getLogger(__name__)
+
 FETCH_MODULE = "camoufox_mcp.updater.fetch"
 STDERR_TAIL_BYTES = 2000
 STDERR_CHUNK_BYTES = 4096
 # How long a terminated child gets to exit before it is killed: it is mid-download or
 # mid-extract, and holds nothing this process needs to see written.
 TERMINATE_TIMEOUT_S = 5.0
+# How long a killed child gets to be reaped. SIGKILL cannot be caught, so only a process
+# stuck in uninterruptible I/O, or a grandchild holding the stderr pipe open, outlives it.
+KILL_TIMEOUT_S = 5.0
 
 
 async def fetch_in_child(config: ServerConfig, asset: FetchAsset) -> None:
@@ -86,13 +92,38 @@ async def _stderr_tail(stream: asyncio.StreamReader | None) -> str:
 
 
 async def _terminate(process: asyncio.subprocess.Process) -> None:
-    if process.returncode is not None:
-        return
+    """Stop ``process`` and reap it, every step under a deadline, whatever it prints.
+
+    The wait drains stderr rather than merely awaiting the exit. asyncio resolves
+    ``Process.wait()`` only once the process has exited AND every pipe has reported EOF,
+    and a ``StreamReader`` holding more than twice its limit (128 KiB) unread pauses the
+    pipe, so that EOF is never observed while nothing reads: a child that printed a
+    backlog after this side stopped reading, then died, left a plain ``wait()`` pending
+    forever, and the shutdown with it.
+    """
     with contextlib.suppress(ProcessLookupError):
         process.terminate()
-    try:
-        await bounded(process.wait(), TERMINATE_TIMEOUT_S)
-    except TimeoutError:
-        with contextlib.suppress(ProcessLookupError):
-            process.kill()
+    if await _reaped_within(process, TERMINATE_TIMEOUT_S):
+        return
+    with contextlib.suppress(ProcessLookupError):
+        process.kill()
+    if not await _reaped_within(process, KILL_TIMEOUT_S):
+        logger.warning(
+            "Camoufox fetch child %s did not exit within %.0fs of SIGKILL; leaving it",
+            process.pid,
+            KILL_TIMEOUT_S,
+        )
+
+
+async def _reaped_within(process: asyncio.subprocess.Process, timeout: float) -> bool:
+    """Discard the rest of stderr, then wait for the exit that EOF makes observable."""
+
+    async def reap() -> None:
+        await _stderr_tail(process.stderr)
         await process.wait()
+
+    try:
+        await bounded(reap(), timeout)
+    except TimeoutError:
+        return False
+    return True
