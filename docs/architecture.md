@@ -198,7 +198,10 @@ claim on fd 1, so a refresh that swapped the streams in that window handed the t
 `StringIO` and the server died before its first reply. The parent keeps the local half:
 reading the `browsers/` tree, activating the pinned build (a config write), the stamp.
 Cancelling the refresh at shutdown terminates the child under a deadline, so a black-holed
-download never holds the exit. The only remaining stream swap is `sessions/quiet.py`,
+download never holds the exit; that wait keeps draining stderr, because asyncio resolves
+`Process.wait()` only once every pipe has reported EOF, and a `StreamReader` paused on an
+unread backlog never sees one (`tests/test_fetch_child_teardown.py` drives the real child
+into that backlog). The only remaining stream swap is `sessions/quiet.py`,
 around a browser launch, which is safe because the transport holds its own handle on fd 1
 before any session can exist; `tests/test_no_stream_swaps.py` guards both facts.
 

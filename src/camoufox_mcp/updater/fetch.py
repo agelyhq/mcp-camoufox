@@ -7,8 +7,12 @@ against the process streams at call time and exposing no other sink, so the only
 that output can go without a process-global stream swap is a process of its own. The
 child re-derives its :class:`ServerConfig` from the environment the parent copied to it.
 
-Nothing here activates a build: activation is a local config write the parent owns
-(:mod:`.builds`), so the child does exactly what needs the network and nothing else.
+The child does not decide which build is ACTIVE, but it does write that config key:
+camoufox's ``install_versioned`` calls ``set_active`` on every build it installs (and on
+an already-installed one when nothing is active yet), and its updater activates what it
+fetches. Unpinned, that activation stands, and is the point. Pinned, it is transient:
+the parent re-asserts the pin (:mod:`.builds`) after every browser fetch, before any
+launch, so the child's write is overridden rather than trusted.
 """
 
 from __future__ import annotations

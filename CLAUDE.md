@@ -114,7 +114,10 @@ differentiators, credits), never grows a reference section, and names no other p
   writes, and never writes inside site-packages. Every fetch runs in a child process
   (`updater/child.py` spawns `python -m camoufox_mcp.updater.fetch`, stdin and stdout on the
   null device, a bounded stderr tail as the failure message); the parent keeps the offline
-  half (disk reads, activating the pin, the stamp) and terminates the child on shutdown.
+  half (disk reads, activating the pin, the stamp) and terminates the child on shutdown,
+  draining stderr while it waits: `Process.wait()` resolves only after every pipe hits EOF,
+  and a reader paused on an unread backlog never sees one. The child's own `set_active`
+  (camoufox does it on every install) is overridden by the parent re-asserting the pin.
 - **This process never assigns `sys.stdout` or `sys.stderr`.** A redirect is process-global
   whichever thread enters it, and fastmcp 4 suspends between our lifespan's `yield` and the
   stdio transport's claim on fd 1: a refresh that swapped the streams from a worker thread in
