@@ -143,8 +143,9 @@ binds only `uv sync`; `uv tool install`, which is how users install, ignores it 
 the pyproject constraints fresh. With fastmcp unbounded above, that resolution shipped
 fastmcp 4.0.3 / mcp 2.2.0 to users on 2026-08-31 while the lock, and so every test run,
 sat on fastmcp 3.4.4 / mcp 1.26.0: an untested major reached users before it reached CI.
-The bound makes the installed stack the tested one. Release 0.4.1 ships fastmcp 3.4.4 /
-mcp 1.26.0, unchanged.
+The bound makes the installed stack the tested one. It was introduced in the 0.4.1 commits,
+but neither 0.4.0 nor 0.4.1 reached PyPI (both release runs failed the metadata check), so
+0.4.2 is the first release that ships it, on fastmcp 3.4.4 / mcp 1.26.0, unchanged.
 
 The full suite measured on fastmcp 4.0.3 / mcp 2.2.0 fails 6 tests, none environmental:
 
