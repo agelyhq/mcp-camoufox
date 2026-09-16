@@ -69,6 +69,12 @@ def upload_page():
     return render_template("upload.html")
 
 
+@app.route("/composer")
+def composer_page():
+    """A social-network post composer: every file input hidden behind a button."""
+    return render_template("composer.html")
+
+
 @app.route("/wait-for")
 def wait_for_page():
     return render_template("wait_for.html")

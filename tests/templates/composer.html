@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Composer Test{% endblock %}
+{% block content %}
+<h1>Composer Test</h1>
+<p>The shape a social network gives its post composer: no file input is ever visible,
+each one sits behind a button whose handler calls <code>input.click()</code>.</p>
+
+<div class="section">
+  <h2>Add media (display:none sibling)</h2>
+  <button type="button" id="add-media">Add media</button>
+  <input type="file" id="media-input" name="file" style="display:none">
+  <div id="media-output" class="output">No media</div>
+</div>
+
+<div class="section">
+  <h2>Attach (opacity:0 sibling)</h2>
+  <button type="button" id="attach-clear">Attach</button>
+  <input type="file" id="clear-input" name="file"
+         style="opacity:0;position:absolute;width:1px;height:1px;overflow:hidden">
+  <div id="clear-output" class="output">No attachment</div>
+</div>
+
+<div class="section">
+  <h2>Add photo (form-wrapped)</h2>
+  <form id="photo-form" enctype="multipart/form-data" onsubmit="return false;">
+    <button type="button" id="add-photo">Add photo</button>
+    <input type="file" id="photo-input" name="file" style="display:none">
+  </form>
+  <div id="photo-output" class="output">No photo</div>
+</div>
+
+<div class="section">
+  <h2>Clicks</h2>
+  <div id="click-log" class="output">no clicks yet</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  function echoUpload(input, outputId) {
+    input.addEventListener('change', function() {
+      var out = document.getElementById(outputId);
+      if (!this.files.length) { out.textContent = 'No file selected'; return; }
+      out.textContent = 'Uploading ' + this.files[0].name + '...';
+      var fd = new FormData();
+      fd.append('file', this.files[0]);
+      fetch('/api/upload', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          out.textContent = 'Server response:\n' + JSON.stringify(data, null, 2);
+        })
+        .catch(function(err) {
+          out.textContent = 'Upload error: ' + err;
+        });
+    });
+  }
+  function openChooser(buttonId, inputId) {
+    document.getElementById(buttonId).addEventListener('click', function() {
+      var log = document.getElementById('click-log');
+      log.textContent = buttonId + ' clicked, input.click() dispatched';
+      document.getElementById(inputId).click();
+    });
+  }
+  echoUpload(document.getElementById('media-input'), 'media-output');
+  echoUpload(document.getElementById('clear-input'), 'clear-output');
+  echoUpload(document.getElementById('photo-input'), 'photo-output');
+  openChooser('add-media', 'media-input');
+  openChooser('attach-clear', 'clear-input');
+  openChooser('add-photo', 'photo-input');
+</script>
+{% endblock %}
