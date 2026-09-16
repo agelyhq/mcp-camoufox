@@ -113,6 +113,12 @@ async def test_server_instructions_are_served(client: Client) -> None:
         "observe=",
         ':has-text("...")',
         "Error: <Type>",
+        # The UPLOADING doctrine: the button to never click, the route that reaches a
+        # hidden input, and the attachment that has no path.
+        "upload_file",
+        'selector="input[type=file]"',
+        "Add media",
+        "attached to the chat",
     ):
         assert topic in instructions, f"the instructions no longer mention {topic!r}"
 

@@ -66,6 +66,15 @@ ACTING
 - `new_page` opens a tab and `close_page` closes 1. Close tabs you are done with:
   an open tab keeps its memory, listeners and monitors alive all session.
 
+UPLOADING
+- Never click a site's "Add media" / "Upload" button: it opens an OS dialog no tool
+  can drive. Call `upload_file` with selector="input[type=file]" (a hidden input is
+  accepted) or the uid of the input's label.
+- `file_path` is an absolute native path on the machine running this server, e.g.
+  C:\\Users\\you\\Pictures\\post.png or /home/you/post.png; quotes from Explorer's
+  "Copy as path" are accepted. A file attached to the chat has no disk path: ask the
+  user for one.
+
 ERRORS
 - A failing tool returns 1 line, "Error: <Type>: <message>" or "Timeout: <message>",
   as its normal result. Nothing is raised, so read the returned string.
