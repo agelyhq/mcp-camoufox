@@ -196,6 +196,32 @@ find it where it left it.
 The daemon has its own idle TTL, but it only fires at zero active sessions and zero
 in-flight requests, so it never kills a live browser to hit a timeout.
 
+## No file chooser interception
+
+A site's "Add media" button calls `input.click()` on a hidden file input, and the browser
+answers with its native file dialog: a real window on a visible desktop, a silent no-op in
+headless. Playwright can intercept it, and only when a client subscribes to `filechooser`
+does the driver ask Juggler to. Subscribing at tab creation would make that click inert
+on every OS, which is what an agent that clicked the button anyway would want.
+
+We do not subscribe, because the interception writes to the page. To carry the event the
+driver builds an `ElementHandle` for the input (`_onFileChooserOpened`, coreBundle.js:43499
+at playwright 1.60), and that constructor instantiates the driver's injected script in the
+page's main world (:16046 -> :16049). Measured with the suite's probes on the composer
+page: 1 `MutationObserver` and the 13-listener branded set on `window`, the same footprint
+`tests/test_driver_footprint.py` pins for a DOM node logged to the console, and nothing at
+all without the listener. Our own handler is not involved; the leak is in the driver
+process, and no client-side switch avoids it. The line numbers are bound to the pinned
+driver and are refreshed on the next deliberate bump.
+
+So the answer to that dialog is guidance and a route, not a listener: the UPLOADING block
+of the server instructions says never to click the button, and `upload_file` takes
+`selector="input[type=file]"`, which binds a hidden input without the visibility gate.
+The recovery path an agent takes after clicking anyway, the same tab still answering and
+the selector route attaching, is proved by `tests/test_upload.py`; the absence of the
+subscription is read off the source by `tests/test_driver_footprint.py`. Should the driver
+ever intercept the dialog without a handle, this decision is up for revisiting.
+
 ## uBlock Origin stays on
 
 Camoufox adds its own addons to every browser it launches, uBlock Origin among them, and

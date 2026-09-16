@@ -105,6 +105,18 @@ Element actions therefore go through `page.elements`, and every screenshot passe
 `caret="initial"` so Playwright stops writing `caret-color: transparent` inline onto every
 field before capturing.
 
+The same reason keeps the per-tab listeners to `dialog` and `domcontentloaded`, plus the
+console and network monitors. A `filechooser` subscription would make a page-driven
+`input.click()` inert, but the driver carries that event as an `ElementHandle` for the
+input, and building one leaves exactly the second footprint above whatever the Python
+handler does. So there is no subscription: a click on a site's "Add media" button opens the
+native dialog on a visible window and is a silent no-op in headless, and `upload_file`
+reaches the input instead, by `selector="input[type=file]"` bound without the visibility
+gate. The measurement and the argument are in `docs/decisions.md`;
+`tests/test_driver_footprint.py` fails if the subscription returns under any spelling: the
+event name, the `expect_file_chooser` wait, or a `Page.raw` access outside the five
+attributes the invariant allows.
+
 Tools never touch Playwright any other way, and never return a raw Playwright object.
 
 ## 🏷️ The uid system

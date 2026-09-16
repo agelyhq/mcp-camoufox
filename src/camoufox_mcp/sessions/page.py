@@ -49,6 +49,10 @@ class Page:
         # and it is created without any I/O.
         self.elements = ElementRegistry(self, target_closed=PLAYWRIGHT_TARGET_CLOSED_ERROR)
         page.on("dialog", self._on_dialog)
+        # Deliberately no "filechooser" listener: the driver's interception writes to
+        # the page. Measured and argued in docs/decisions.md, "No file chooser
+        # interception"; guarded by tests/test_driver_footprint.py.
+
         # A new document means the old store is gone with its execution context.
         # Retiring the handle here saves the next operation one doomed round trip;
         # correctness still rests on the exception path inside the registry.

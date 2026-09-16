@@ -91,7 +91,12 @@ differentiators, credits), never grows a reference section, and names no other p
   `caret="initial"`; `evaluate_handle` may only ever build the registry object. Banned
   repo-wide: `locator()`, `query_selector`, `wait_for_selector`, `wait_for_function`,
   `page.<action>(selector, ...)`, every `ElementHandle` action. Both reasons are measured
-  in `docs/architecture.md`. Guarded by `tests/test_no_markers.py`, whose probes
+  in `docs/architecture.md`. No tab subscribes to `filechooser`: the driver carries that
+  event as an `ElementHandle`, whose construction alone installs the injected script (measured,
+  `docs/decisions.md`), so a page-driven `input.click()` opens the native dialog and the
+  answer is the UPLOADING guidance plus the selector route; `tests/test_driver_footprint.py`
+  fails if the subscription returns under any spelling, and pins the `raw` allowlist above
+  by reading every `.raw.<attr>` under `src/`. Guarded by `tests/test_no_markers.py`, whose probes
   (`tests/probes.py`) are proved able to detect each signal before asserting its absence,
   refuse a document the parser has not finished, name every mutation's target, and run with
   no extension at all: Camoufox ships uBlock Origin, excluded only when EITHER
