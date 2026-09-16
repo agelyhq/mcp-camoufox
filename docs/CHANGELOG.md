@@ -6,6 +6,135 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-09-16
+
+`upload_file` attaches a file from a Windows desktop again. The report was "cannot attach a
+file from disk" on Claude Desktop; the diagnosis found 3 confirmed defects, none of them
+Windows-specific in the code, that a visible-window Windows session trips over far more often
+than a Linux one, plus 5 Windows edge cases the read path could not prove correct. All are
+addressed but one, which is argued shut instead.
+
+### Fixed
+
+- **A hidden `<input type=file>` was unreachable.** Every uid mint runs the visibility gate,
+  so a site's `display:none` or `opacity:0` file input (the LinkedIn shape, where the "Add
+  media" button is a sibling of the input) never got a uid, `upload_file` took `uid` only,
+  and the only uid the agent could obtain answered `no file input found`. `upload_file` now
+  takes `uid` XOR `selector`, resolved through the same `tools/_target.py` rule as `click`
+  and `fill`, and its selector arm binds the first match WITHOUT the visibility gate, so
+  `selector="input[type=file]"` attaches to an input the site keeps hidden. `find`,
+  `click` and `fill` keep the gate.
+- **The path was taken literally.** No strip, quote removal, `~`/`%VAR%` expansion, `file:`
+  conversion or absolute-path check existed, and `Path.is_file` swallowed ENOENT, ENOTDIR
+  and the Win32 invalid-name errors alike, so Explorer's "Copy as path" (double quotes),
+  `%USERPROFILE%\...`, `file:///C:/...`, `/mnt/c/...` and a bare relative name all collapsed
+  into `'<path>' is not a readable file`. `dom/upload_path.py` now resolves, in order:
+  surrounding whitespace, one pair of matching quotes, a `file:` URI, `%VAR%`/`$VAR`, `~`;
+  then refuses a relative path naming the server's working directory (with a WSL hint on
+  Windows for `/mnt/<letter>/`); `dom/upload_read.py` reports every `stat` refusal with its strerror, errno
+  and winerror, the checked path when it differs from the typed one, and the length once
+  it is at or past Win32's 260-character ceiling.
+- **A read that failed after a passing `stat` was off-contract.** The bytes were read
+  synchronously on the event loop with no `OSError` handling, so a OneDrive placeholder
+  that OneDrive could not hydrate or a file another program holds exclusively rendered as
+  `Error: PermissionError: [Errno 13] ...` (or `OSError: [Errno 22]`) with a traceback in
+  the server log, and a slowly hydrating file froze every in-flight call. The read now runs
+  on a daemon thread under `READ_TIMEOUT` (30 s), every `OSError` is a one-line
+  `ValueError`, `EACCES` on Windows carries the open-in-another-program hint, and a
+  placeholder (`FILE_ATTRIBUTE_OFFLINE` or `RECALL_ON_DATA_ACCESS`) is refused before the
+  read that would block on it.
+- **A trailing space in the path was silent on Windows.** Win32 strips trailing spaces and
+  periods before NTFS, so the read succeeded while `path.name` kept the space, the MIME
+  guess failed and the page received a `File` named `post.png ` of type
+  `application/octet-stream`. The path is stripped first, the payload name is taken from
+  `path.resolve()` on Windows, and the confirmation line now states the name, type and size
+  the page received (see Changed).
+- **The MIME type came from the Windows registry.** `mimetypes` loads `HKCR\.ext` on
+  Windows with nothing after it to re-assert the standard values, so a third-party
+  installer's `image/pjpeg` or `image/x-png` reached the page verbatim. `dom/upload_mime.py`
+  sniffs the magic bytes of PNG, JPEG, GIF, WebP and PDF first, then falls back to
+  `mimetypes`, then `application/octet-stream`.
+- **A path of 260 characters or more failed `stat` on Windows** with the generic line unless
+  the `LongPathsEnabled` policy was on. Such a path is stat'ed and read in the `\\?\` form
+  (`\\?\UNC\...` for a share), normalised with `ntpath.normpath` first because the prefix
+  turns Win32 normalisation off; messages keep the typed spelling.
+
+### Added
+
+- `upload_file(profile, file_path, uid=None, selector=None)`: the `selector` parameter,
+  with the `provide exactly one of uid or selector` rule `click` and `fill` already apply.
+- An `UPLOADING` block in the server instructions and a rewritten `upload_file` docstring:
+  never click a site's "Add media" / "Upload" button (it opens an OS dialog no tool can
+  drive), call `upload_file` with `selector="input[type=file]"` or the label's uid,
+  `file_path` is an absolute native path on the machine running the server, and a file
+  attached to the chat has no disk path. `tests/payload_baseline.json` is re-baselined
+  for it (`tools/list` 22,792 → 23,346 bytes, instructions 2,629 → 3,115).
+- `tests/templates/composer.html` (`/composer`), a LinkedIn-shaped page: `display:none`
+  and `opacity:0` sibling inputs, a form-wrapped one, buttons calling `input.click()`.
+  `tests/test_upload_path.py` drives every path shape with a POSIX equivalent through the
+  tool, `tests/test_upload_read.py` every disk refusal after the path resolved, and
+  `tests/test_upload_win32.py` the Windows-only rules (`%USERPROFILE%`, `file:///C:/`, UNC,
+  `C:foo` and `/mnt/c/` shapes, `\\?\` prefixing, the placeholder attribute,
+  trailing-space stripping, the length note, the `EACCES` lock hint and the `winerror`
+  rendering) as focused tests on `PureWindowsPath`: `resolve_upload_path` takes the path
+  flavour as a public keyword and every Windows rule keys on it, never on `os.name`.
+  `tests/upload_helpers.py` holds the Flask echo assertions the suites share.
+
+### Changed
+
+Every public string that moved, old → new, so the previous behaviour can be restored:
+
+- Success line: `Uploaded {file_path} to {uid}` → `Uploaded {name} ({mime}, {size} bytes)
+  to {uid}`, e.g. `Uploaded post.png (image/png, 48213 bytes) to e12`. The three values are
+  what the page's `File` was built with, so a wrong name or type shows without a second
+  call.
+- `no file input found for uid '{uid}'` → `no file input found for uid '{uid}'; pass
+  selector="input[type=file]" (a hidden input is accepted) or the uid of the input's
+  <label>`.
+- `'{file_path}' is not a readable file` splits into: `cannot read '{raw}': {strerror}
+  (errno N[, winerror N])[ (checked '{path}')][; the path is L characters, past Win32's 260
+  limit[, tried in the \\?\ form]]` for a missing file, a bad name or a denied directory;
+  `'{raw}' is not a regular file[ (checked '{path}')]` for a directory, device or socket;
+  `file_path must be an absolute path on this machine; got '{raw}'[ (expanded to '{text}')]
+  (server working directory: {cwd})[; that is a WSL path: on Windows use C:\...]` for a
+  relative path, which was previously tried against the working directory; the expansion
+  is named when it changed the text, so a `$HOME/...` typed on Windows shows what it became.
+- New strings with no predecessor: `cannot read '{raw}': {strerror} (errno N)[; the file may
+  be open in another program: close it and retry]` (a read failing after `stat` passed,
+  previously an off-contract `PermissionError`/`OSError` line); `'{raw}' is a OneDrive/cloud
+  placeholder not downloaded on this machine; right-click it > 'Always keep on this device'
+  and retry`; `Timeout: reading '{raw}' did not finish within 30s; a cloud-synced or network
+  file may still be downloading`.
+- `upload_file`'s telemetry record carries the `targets` list `click` and `fill` already
+  write, since it now goes through the same target resolution.
+
+### Decided
+
+- **No `filechooser` interception**, although subscribing at tab creation would make a
+  page-driven `input.click()` inert on every OS. It was implemented and measured with the
+  suite's own probes: every delivered chooser event makes the driver build an
+  `ElementHandle` for the input (`coreBundle.js:43499`, playwright 1.60), whose constructor
+  instantiates the injected script in the page's main world, 1 `MutationObserver` plus the
+  13-listener branded set on `window`, with nothing at all as the control. That is the
+  footprint the "nothing is written to the page" invariant forbids, regardless of what the
+  Python handler does, so the listener was removed before shipping. A click on "Add media"
+  therefore still opens the native dialog on a visible window (a silent no-op in headless);
+  the answer is the UPLOADING guidance and the selector route. Argued in
+  `docs/decisions.md`, "No file chooser interception"; `tests/test_driver_footprint.py`
+  fails if the subscription comes back.
+
+### Validation on Windows
+
+Only a Windows box proves the trailing-space stripping, the `\\?\` `stat` difference, the
+placeholder and sharing-violation errnos and the actual `HKCR` MIME values. Install by git
+ref (`uvx --from git+https://github.com/agelyhq/mcp-camoufox@v0.4.3 mcp-camoufox`, a new tag
+is a new uv cache key), fully quit and relaunch Claude Desktop, confirm `selector` is listed
+on `upload_file`, then upload a clean `C:\...` path, the same path as Explorer's "Copy as
+path" quotes it, and a wrong name: expect `Uploaded post.png (image/png, N bytes) to eN`
+twice and the `cannot read` line naming the checked path once.
+`%LOCALAPPDATA%\camoufox-mcp\logs\<profile>.jsonl` holds the `args.file_path` and result
+of every call.
+
 ## [0.4.2] - 2026-09-15
 
 The release pipeline publishes again, and 3 findings from the 0.4.1 review are closed: the
@@ -817,7 +946,8 @@ backed by Camoufox, with per-profile session isolation.
 
 - The S3 profile sync stack. Profiles are local-disk only.
 
-[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/agelyhq/mcp-camoufox/compare/v0.3.5...v0.4.0
