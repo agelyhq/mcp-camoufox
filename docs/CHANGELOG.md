@@ -46,9 +46,11 @@ addressed but one, which is argued shut instead.
 - **A trailing space in the path was silent on Windows.** Win32 strips trailing spaces and
   periods before NTFS, so the read succeeded while `path.name` kept the space, the MIME
   guess failed and the page received a `File` named `post.png ` of type
-  `application/octet-stream`. The path is stripped first, the payload name is taken from
-  `path.resolve()` on Windows, and the confirmation line now states the name, type and size
-  the page received (see Changed).
+  `application/octet-stream`. The path is stripped first, `payload_name` applies the same
+  Win32 rule lexically to the last component of a Windows path (never through `resolve()`,
+  which would follow a symlink or junction and name its target; a `\\?\` path keeps its
+  name as typed, since the prefix turns that normalisation off), and the confirmation line
+  now states the name, type and size the page received (see Changed).
 - **The MIME type came from the Windows registry.** `mimetypes` loads `HKCR\.ext` on
   Windows with nothing after it to re-assert the standard values, so a third-party
   installer's `image/pjpeg` or `image/x-png` reached the page verbatim. `dom/upload_mime.py`
