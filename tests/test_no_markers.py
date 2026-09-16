@@ -81,6 +81,13 @@ async def _drive_every_page_path(client: Client, upload: str) -> None:
         ("fill", {"profile": PROFILE, "uid": select, "value": "Cherry"}),
         ("fill", {"profile": PROFILE, "uid": check, "value": "true"}),
         ("upload_file", {"profile": PROFILE, "uid": file_uid, "file_path": upload}),
+        # The selector arm binds without the visibility gate, so it is its own path,
+        # and it is driven on the hidden input that path exists for.
+        ("upload_file", {"profile": PROFILE, "selector": "#probe-file", "file_path": upload}),
+        (
+            "upload_file",
+            {"profile": PROFILE, "selector": "#probe-hidden-file", "file_path": upload},
+        ),
         ("screenshot", {"profile": PROFILE}),
         ("screenshot", {"profile": PROFILE, "full_page": True}),
         ("screenshot", {"profile": PROFILE, "uid": button}),

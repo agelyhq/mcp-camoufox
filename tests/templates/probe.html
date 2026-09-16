@@ -28,6 +28,9 @@ mutation an observer records comes from the automation under test.</p>
   <label for="probe-file">Attachment</label>
   <input type="file" id="probe-file" name="attachment">
 
+  <!-- Reachable by selector only: it has no uid, which is the path a hidden input takes. -->
+  <input type="file" id="probe-hidden-file" name="hidden-attachment" style="display:none">
+
   <label><input type="checkbox" id="probe-check"> Accept terms</label>
 </div>
 
