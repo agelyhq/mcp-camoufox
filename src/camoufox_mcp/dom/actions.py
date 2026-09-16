@@ -1,24 +1,23 @@
+"""``fill``: setting the value of an editable element, dispatched on what the element is.
+
+Every handler reads the same resolved request, and the handler table is exhaustive over
+the kinds the page's ``kindOf`` can report. The file kind is refused here by name: the
+upload pipeline is :mod:`camoufox_mcp.dom.upload`.
+"""
+
 from __future__ import annotations
 
-import base64
-import mimetypes
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from camoufox_mcp.dom.errors import raise_for
 from camoufox_mcp.dom.identity import element_call, resolve
-from camoufox_mcp.dom.waiting import UPLOAD_TIMEOUT
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from camoufox_mcp.dom.identity import Hit
     from camoufox_mcp.dom.page_protocol import ActionablePage
-
-# The bytes cross the protocol base64-encoded, so a ceiling is needed where the
-# local-path route had none.
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 # How much of one piece of page-written text a message here may echo. Long enough to
 # identify an <option> a human would recognise, short enough that a page cannot size a
@@ -153,26 +152,6 @@ async def fill_field(
 def _filled(tag: str, value: str) -> str:
     """The one confirmation every value-setting path returns."""
     return f"Filled <{tag}> with {len(value)} chars"
-
-
-async def set_files(page: ActionablePage, uid: str, file_path: str) -> str:
-    """Attach a local file to the file input a uid points at (or controls)."""
-    path = Path(file_path)
-    if not path.is_file():
-        raise ValueError(f"'{file_path}' is not a readable file")
-    size = path.stat().st_size
-    if size > MAX_UPLOAD_BYTES:
-        raise ValueError(
-            f"'{file_path}' is {size} bytes; upload_file accepts at most {MAX_UPLOAD_BYTES} bytes"
-        )
-    payload = {
-        "name": path.name,
-        "type": mimetypes.guess_type(path.name)[0] or "application/octet-stream",
-        "data": base64.b64encode(path.read_bytes()).decode("ascii"),
-    }
-    info = await element_call(page, "setFiles", uid, payload, timeout=UPLOAD_TIMEOUT)
-    raise_for(info, uid, op="setFiles")
-    return f"Uploaded {file_path} to {uid}"
 
 
 async def _type_into(request: _Fill) -> str:

@@ -28,11 +28,12 @@ from playwright.async_api import Error as DriverError
 from playwright.async_api import TimeoutError as DriverTimeout
 
 from camoufox_mcp.dom import registry as registry_module
-from camoufox_mcp.dom.actions import fill_field, set_files
+from camoufox_mcp.dom.actions import fill_field
 from camoufox_mcp.dom.capture import capture_snapshot
 from camoufox_mcp.dom.errors import DeadContextError
 from camoufox_mcp.dom.identity import bind_selector, element_call, resolve, scroll_uid
 from camoufox_mcp.dom.scripting import evaluate_with_uids
+from camoufox_mcp.dom.upload import set_files
 from camoufox_mcp.sessions.errors import PLAYWRIGHT_TARGET_CLOSED_ERROR
 from tests.fakes import FakeHandle, FakePage
 from tests.helpers import STALE_UID

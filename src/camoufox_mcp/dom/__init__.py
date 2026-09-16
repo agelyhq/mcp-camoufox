@@ -11,7 +11,7 @@ one advertises a boundary the module was never designed to be.
 
 from __future__ import annotations
 
-from camoufox_mcp.dom.actions import MAX_UPLOAD_BYTES, fill_field, set_files
+from camoufox_mcp.dom.actions import fill_field
 from camoufox_mcp.dom.capture import (
     DEFAULT_INTERACTIVE_ONLY,
     DEFAULT_MAX_NODES,
@@ -31,6 +31,7 @@ from camoufox_mcp.dom.page_protocol import ActionablePage, EvaluatablePage, Regi
 from camoufox_mcp.dom.reads import NAMED_PROPS, READABLE_PROPS, read_property
 from camoufox_mcp.dom.registry import ElementRegistry
 from camoufox_mcp.dom.scripting import evaluate_with_uids
+from camoufox_mcp.dom.upload import MAX_UPLOAD_BYTES, set_files
 from camoufox_mcp.dom.waiting import PollExpiredError, poll_until
 
 __all__ = [
