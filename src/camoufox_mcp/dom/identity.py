@@ -155,18 +155,28 @@ async def resolve(
 
 
 async def bind_selector(
-    page: RegistryPage, selector: str, *, deadline: float = ACTION_DEADLINE
+    page: RegistryPage,
+    selector: str,
+    *,
+    visible: bool = True,
+    deadline: float = ACTION_DEADLINE,
 ) -> str:
-    """Wait for the first visible match of ``selector`` and give it a uid.
+    """Wait for the first match of ``selector`` and give it a uid.
 
     Supported syntax is plain CSS plus ``:has-text("...")`` and ``text=...``.
     Anything else is refused by name rather than matching nothing.
+
+    ``visible`` is the gate every other uid mint applies. A pointer or keyboard action
+    needs it, because it acts where the element is drawn; ``upload_file`` does not,
+    because it hands the page a ``File`` and a site's ``<input type=file>`` is hidden
+    behind its own "Add media" button as a rule, not as an exception. With
+    ``visible=False`` the first probe binds whatever the CSS engine matches.
 
     An expiry is reported as an expiry: the message names the budget it spent and
     says whether the selector matched nothing at all or matched something that stayed
     invisible.
     """
-    result = await locate_visible(page, selector, deadline=deadline, mint=True)
+    result = await _locate(page, selector, deadline=deadline, mint=True, limit=1, visible=visible)
     if result is None:
         raise ValueError(await _miss_message(page, selector, deadline))
     return str(result["ids"][0])
@@ -231,9 +241,15 @@ async def locate_many(
 
 
 async def _locate(
-    page: RegistryPage, selector: str, *, deadline: float, mint: bool, limit: int
+    page: RegistryPage,
+    selector: str,
+    *,
+    deadline: float,
+    mint: bool,
+    limit: int,
+    visible: bool = True,
 ) -> dict[str, Any] | None:
-    """Poll until ``selector`` matches something visible; return the payload or None."""
+    """Poll until ``selector`` matches something (visible unless told otherwise)."""
 
     def accept(info: Any) -> bool:
         return isinstance(info, dict) and (bool(info.get("err")) or bool(info.get("ids")))
@@ -241,7 +257,8 @@ async def _locate(
     async def probe() -> Any:
         try:
             return await page.elements.call(
-                "locate", {"selector": selector, "visible": True, "limit": limit, "mint": mint}
+                "locate",
+                {"selector": selector, "visible": visible, "limit": limit, "mint": mint},
             )
         except DeadContextError:
             # The document went away mid-poll: the next probe rebuilds the store.

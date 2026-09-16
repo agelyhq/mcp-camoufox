@@ -84,7 +84,10 @@ _TEMPLATES: dict[str, str] = {
     "not_focusable": "element <{tag}> for uid '{target}' could not take focus",
     "not_select": "element <{tag}> for uid '{target}' is not a select",
     "no_option": "uid '{target}' has no option with that value",
-    "no_file_input": "no file input found for uid '{target}'",
+    "no_file_input": (
+        "no file input found for uid '{target}'; pass selector=\"input[type=file]\" "
+        "(a hidden input is accepted) or the uid of the input's <label>"
+    ),
     "directory_input": (
         "uid '{target}' is a directory input (webkitdirectory); "
         "uploading a directory is not supported"

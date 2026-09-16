@@ -25,16 +25,21 @@ def require_one_target(uid: str | None, selector: str | None) -> None:
         raise ValueError(_EXACTLY_ONE)
 
 
-async def resolve_target(page: RegistryPage, uid: str | None, selector: str | None) -> str:
+async def resolve_target(
+    page: RegistryPage, uid: str | None, selector: str | None, *, visible: bool = True
+) -> str:
     """The uid to act on, binding the selector to one when that is what was given.
 
     The address is noted here, for both arms and before either does any page work, so
     the record says what a call was aiming at even when nothing matched. What the
     element turns out to BE is attached later, by the caller holding the hit its own
     ``resolve`` already measured.
+
+    ``visible`` reaches the selector arm only: a uid is already minted. The one tool
+    that passes ``False`` is ``upload_file``, whose target is hidden by design.
     """
     require_one_target(uid, selector)
     note_target(uid=uid, selector=selector)
     if uid is not None:
         return uid
-    return await bind_selector(page, str(selector))
+    return await bind_selector(page, str(selector), visible=visible)
