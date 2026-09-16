@@ -96,15 +96,23 @@ def server_for(monkeypatch: pytest.MonkeyPatch, data_dir: Path, **env: str) -> F
     return build_server(ServerConfig.from_env())
 
 
-def extract_uid(snapshot: str, label: str) -> str:
-    """Find the UID for an element containing `label` in the snapshot text."""
+def find_uid(snapshot: str, label: str) -> str | None:
+    """The UID on the first snapshot line holding ``label``, or ``None`` when none does."""
     for line in snapshot.splitlines():
         if label.lower() in line.lower():
             match = re.search(r"e\d+", line)
             if match:
                 return match.group()
-    msg = f"No UID found for label '{label}' in snapshot"
-    raise ValueError(msg)
+    return None
+
+
+def extract_uid(snapshot: str, label: str) -> str:
+    """Find the UID for an element containing `label` in the snapshot text."""
+    uid = find_uid(snapshot, label)
+    if uid is None:
+        msg = f"No UID found for label {label!r} in snapshot:\n{snapshot}"
+        raise ValueError(msg)
+    return uid
 
 
 def uids(text: str) -> list[str]:
@@ -155,8 +163,21 @@ async def open_and_snapshot(client: Client, url: str, profile: str = PROFILE) ->
 
 
 async def goto_and_find(client: Client, url: str, profile: str, label: str) -> str:
-    """Navigate to ``url``, snapshot the page, and return the UID matching ``label``."""
-    return extract_uid(await open_and_snapshot(client, url, profile), label)
+    """Navigate to ``url`` and return the UID matching ``label`` once a snapshot holds it.
+
+    Under machine contention the first snapshot after a fresh session's navigation has
+    been seen without the page's controls, so the label's appearance is what is waited
+    for, deadline as guardrail, and the last snapshot is the failure's diagnostic.
+    """
+    # :mod:`tests.waits` imports ``tool_text`` from here, so the poller is imported at
+    # call time rather than at module scope.
+    from tests.waits import poll_until
+
+    await open_page(client, url, profile)
+    snapshot, _ = await poll_until(
+        lambda: snapshot_text(client, profile), lambda text: find_uid(text, label) is not None
+    )
+    return extract_uid(snapshot, label)
 
 
 async def call_within(client: Client, tool: str, args: dict[str, object], budget: float) -> str:
