@@ -89,13 +89,14 @@ you and kept in the log, and neither is a place a password belongs.
 | `fill_form` | `profile, fields` | Fills several fields at once: `fields = [{uid, value}, ...]`. |
 | `press_key` | `profile, key` | Sends a key, for example `Enter` or `Control+A`. |
 | `scroll` | `profile, direction, amount?, uid?` | Scrolls the page, or scrolls an element into view. |
-| `upload_file` | `profile, uid, file_path` | Sets a file input's value. |
+| `upload_file` | `profile, file_path, uid \| selector` | Attaches a local file to a file input. `selector="input[type=file]"` reaches a hidden input; `file_path` is an absolute native path on the server machine (quotes, `~`, `%VAR%`, `file://` accepted). |
 | `handle_dialog` | `profile, action, prompt_text?` | Accepts or dismisses a pending `alert`, `confirm` or `prompt`. |
 
 ### uid or selector
 
-`click` and `fill` accept exactly one of the two. Passing both, or neither, is an
-error rather than a silent preference.
+`click`, `fill` and `upload_file` accept exactly one of the two. Passing both, or neither,
+is an error rather than a silent preference. `upload_file` is the one tool whose selector
+binds a hidden match, since sites keep their file input `display:none` behind a button.
 
 Use a uid when you found the element in a snapshot. Use a selector when you already
 know it (`selector="#email"`), which skips the snapshot entirely and is much cheaper.

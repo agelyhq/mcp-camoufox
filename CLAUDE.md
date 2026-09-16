@@ -54,11 +54,24 @@ differentiators, credits), never grows a reference section, and names no other p
 
 - `config.py` is the only reader of `os.environ`; everything else reads `deps.config`. A
   subprocess (the daemon, the fetch child) gets `config.child_env()`, a copy it re-derives its
-  own `ServerConfig` from, so no spawner reads the environment itself.
+  own `ServerConfig` from, so no spawner reads the environment itself. The one exemption is
+  `dom/upload_path.py` expanding `~`, `$VAR` and `%VAR%` in a caller-typed `file_path`: that
+  is user input resolved against the environment of the process doing the reading (the
+  daemon's, when it is on), not server configuration.
 - Session-creation options apply at a profile's first launch only; `navigate` resolves them
   into the frozen `SessionInitOptions` `get_or_create` takes, so no keyword travels untyped.
-- `click`/`fill` take `uid` XOR `selector`, resolved through `tools/_target.py` so the rule and
-  its wording live in 1 place: a selector is polled until visible, gets a uid, and converges.
+- `click`/`fill`/`upload_file` take `uid` XOR `selector`, resolved through `tools/_target.py`
+  so the rule and its wording live in 1 place: a selector is polled until visible, gets a uid,
+  and converges. `upload_file` alone binds with `visible=False`: a site's file input is
+  usually `display:none` behind an "Add media" button, and the gate would leave it unreachable.
+- `upload_file`'s `file_path` is an absolute native path on the machine running the server:
+  `dom/upload_path.py` strips it, drops one pair of quotes, converts a `file:` URI, expands
+  `%VAR%`/`$VAR` and `~`, and refuses a relative path naming the cwd, touching no disk;
+  `dom/upload_read.py` then renders every `stat` or read failure with strerror, errno and
+  the checked path, and runs the read on a daemon thread under `READ_TIMEOUT`. Every Windows
+  rule keys on the path's flavour, a public keyword of `resolve_upload_path`, never on
+  `os.name`, so `tests/test_upload_win32.py` drives it on Linux. `dom/upload.py` orders the
+  steps and owns the size ceiling; the MIME type is sniffed from the bytes before `mimetypes`.
 - Closed sets of accepted words go through `_errors.validate_choice` before any side effect.
 - `observe` is appended by the `@tool` wrapper, never by a tool body, and capped at 4000 chars
   in both modes; `'screenshot'` is not a mode: it would break the sole-image-tool invariant.

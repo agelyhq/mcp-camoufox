@@ -20,7 +20,11 @@ src/camoufox_mcp/
   sessions/            SessionManager, Session, launch kwargs, PageBook, Page, monitors,
                        the log both monitors are built from, teardown, stdio silencing
   dom/                 element identity: registry (the handle), identity, capture,
-                       actions, waiting (the poll), scripting, errors, source
+                       actions (fill), waiting (the poll), scripting, errors, source;
+                       upload (the set_files pipeline and its size ceiling) over
+                       upload_path (a typed file_path to an absolute path, pure text),
+                       upload_read (stat, the placeholder refusal and the bounded read
+                       on a daemon thread) and upload_mime (magic bytes before mimetypes)
   dom/js/              numbered bundle concatenated in order: boot, visibility, names,
                        identity, walk, selector, query, geometry, actions, extract, ops.
                        Never names this project.
@@ -223,6 +227,13 @@ Full scenarios through the MCP surface, not unit tests of internals. The suite r
 in-memory `fastmcp.Client` against the real tool set, a real Camoufox browser, and a
 local Flask server serving `tests/templates/*.html`. Nothing browser-side is mocked
 and no internet access is needed.
+`tests/templates/composer.html` is the LinkedIn-shaped upload page (hidden, transparent
+and form-wrapped file inputs behind buttons calling `input.click()`), and
+`tests/upload_helpers.py` holds the echo assertions `test_upload.py`,
+`test_upload_path.py` (every path shape with a POSIX equivalent, through the tool) and
+`test_upload_read.py` (the disk refusals after a passing `stat`, `READ_TIMEOUT` included)
+share; only the Windows-only path rules have focused tests, in `test_upload_win32.py`,
+driven on a `PureWindowsPath` through `resolve_upload_path`'s public `flavour` keyword.
 
 Every test is bounded by `pytest-timeout` at 180 seconds, using the thread method
 because Windows has no `SIGALRM`. Without it, a browser dying mid-call leaves the
