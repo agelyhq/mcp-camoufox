@@ -38,6 +38,10 @@ OP_TIMEOUT = 15.0
 EVAL_TIMEOUT = 30.0
 # ``setFiles`` only: the file bytes cross the protocol base64-encoded.
 UPLOAD_TIMEOUT = 60.0
+# Reading the upload's bytes off disk, in a worker thread. A local file reads in
+# milliseconds; the budget exists for a cloud placeholder hydrating on first open or
+# a network share that stopped answering, so the loop keeps serving the other calls.
+READ_TIMEOUT = 30.0
 # Releasing a handle is a single protocol round trip, so it normally returns at once
 # even on a destroyed execution context. It is bounded anyway because it runs under
 # the registry's lock, and an unbounded await there would wedge every later operation
