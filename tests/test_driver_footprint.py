@@ -6,6 +6,8 @@ driver-level boundary, and this module measures where it sits instead of assumin
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -20,9 +22,33 @@ from tests.probes import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from fastmcp import Client, FastMCP
+
+SRC = Path(__file__).resolve().parent.parent / "src" / "camoufox_mcp"
+FILE_CHOOSER_EVENT = "filechooser"
+# The driver's other doors onto the chooser, method names with no string literal to key
+# on: each one subscribes to the event for the duration of its context.
+FILE_CHOOSER_METHODS = frozenset({"expect_file_chooser", "wait_for_file_chooser"})
+# What a tool may reach through ``Page.raw`` (CLAUDE.md, "Nothing we do is written to
+# the page"): the input devices, the capture, and the two navigation waits.
+RAW_ALLOWED = frozenset({"mouse", "keyboard", "screenshot", "goto", "wait_for_load_state"})
+
+
+def _modules() -> list[tuple[Path, ast.Module]]:
+    return [
+        (path, ast.parse(path.read_text(encoding="utf-8"))) for path in sorted(SRC.rglob("*.py"))
+    ]
+
+
+def _attribute_hits(accept: object) -> list[str]:
+    """Every ``x.attr`` under src that ``accept`` takes, as ``file:line``."""
+    return [
+        f"{path.relative_to(SRC)}:{node.lineno}"
+        for path, module in _modules()
+        for node in ast.walk(module)
+        if isinstance(node, ast.Attribute) and accept(node)
+    ]
+
 
 LOG_STRING_JS = "(() => { console.log('plain string'); return 1; })()"
 LOG_NODE_JS = "(() => { console.log(document.body); return 1; })()"
@@ -74,3 +100,51 @@ async def test_node_valued_console_argument_forces_the_driver_injected_script(
     )
     assert all(t in probes["listeners"] for t in INTERCEPTOR_EVENTS), probes["listeners"]
     assert probes["mo"] == 1, probes["mo"]
+
+
+def test_nothing_under_src_subscribes_to_the_file_chooser() -> None:
+    """The one driver event this server refuses on purpose, kept refused by reading the source.
+
+    A ``filechooser`` subscription makes the driver build an element handle for the
+    input behind the dialog, and that constructor instantiates the injected script in
+    the page's main world: the same footprint the test above pins for a logged node,
+    paid on every chooser a site opens. The decision is recorded in docs/decisions.md;
+    this walks every module's AST for the event name so a listener cannot come back
+    under any spelling of ``page.on(...)``, and a comment naming the event is not a hit.
+    """
+    hits = [
+        f"{path.relative_to(SRC)}:{node.lineno}"
+        for path, module in _modules()
+        for node in ast.walk(module)
+        if isinstance(node, ast.Constant) and node.value == FILE_CHOOSER_EVENT
+    ]
+    assert hits == [], f"a filechooser subscription is back: {hits}"
+    methods = _attribute_hits(lambda node: node.attr in FILE_CHOOSER_METHODS)
+    assert methods == [], f"a filechooser wait is back: {methods}"
+
+
+def test_page_raw_reaches_only_the_allowed_driver_surface() -> None:
+    """``Page.raw`` is the one door onto the driver, and this pins what goes through it.
+
+    The test above keys on the event's name; a ``page.raw.expect_file_chooser()`` names
+    no event, and neither does any other driver method that addresses an element or
+    writes to the page. So every ``<x>.raw.<attr>`` under src is read from the AST and
+    ``attr`` must be one of the five the invariant lists; a new need is a change to the
+    allowlist here and in CLAUDE.md, never a quiet sixth.
+    """
+    hits = _attribute_hits(
+        lambda node: (
+            isinstance(node.value, ast.Attribute)
+            and node.value.attr == "raw"
+            and node.attr not in RAW_ALLOWED
+        )
+    )
+    assert hits == [], f"page.raw reaches outside {sorted(RAW_ALLOWED)}: {hits}"
+    used = _attribute_hits(
+        lambda node: (
+            isinstance(node.value, ast.Attribute)
+            and node.value.attr == "raw"
+            and node.attr in RAW_ALLOWED
+        )
+    )
+    assert used, "no page.raw access found under src: the walk is not seeing the code"
