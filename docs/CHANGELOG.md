@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-10-07
+
+### Fixed
+
+- **A proxy stayed broken after another proxy respawned the shared daemon.** When the daemon
+  exited (idle TTL, crash) and a second proxy spawned a new one first, the new daemon
+  answered `/health`, so the first proxy took every later failure as genuine and kept the
+  backend MCP session id of the dead process: each call drew a 404, surfacing as
+  "Unknown tool", for the rest of the conversation. The proxy now remembers the daemon
+  instance (`pid` plus `started_at` from `/health`) its backend session was opened against;
+  a failure against a different live instance drops the stale backend session and reports a
+  restart once, and the next call works. The failed request is not retried, as with a
+  respawn.
+
 ## [0.4.3] - 2026-09-16
 
 `upload_file` attaches a file from a Windows desktop again. The report was "cannot attach a
@@ -948,7 +962,8 @@ backed by Camoufox, with per-profile session isolation.
 
 - The S3 profile sync stack. Profiles are local-disk only.
 
-[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.0...v0.4.1
