@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -7,6 +8,8 @@ from camoufox_mcp.deadlines import bounded
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
+
+    from playwright.async_api import Playwright
 
 logger = logging.getLogger(__name__)
 
@@ -31,3 +34,26 @@ async def quietly(step: str, work: Coroutine[Any, Any, Any], timeout: float) -> 
         await bounded(work, timeout)
     except Exception:
         logger.debug("%s failed during teardown", step, exc_info=True)
+
+
+async def stop_driver(playwright: Playwright) -> None:
+    """Stop the Playwright driver and wait for it, even when the caller is cancelled.
+
+    A cancelled teardown (an MCP client whose disconnect deadline expired mid-close,
+    a shutdown cancelling every task) used to abandon this step before it began: the
+    driver subprocess then never saw its stdin close, and its asyncio transport was
+    only finalized after the event loop had closed ("Event loop is closed" from
+    ``BaseSubprocessTransport.__del__``), with the browser behind it still running.
+    The stop therefore runs as a task of its own that cancellation cannot reach, and
+    this waits for it, bounded by :data:`DRIVER_STOP_TIMEOUT`, before re-raising the
+    cancellation it absorbed.
+    """
+    stop = asyncio.ensure_future(quietly("Playwright stop", playwright.stop(), DRIVER_STOP_TIMEOUT))
+    cancelled = False
+    while not stop.done():
+        try:
+            await asyncio.shield(stop)
+        except asyncio.CancelledError:
+            cancelled = True
+    if cancelled:
+        raise asyncio.CancelledError

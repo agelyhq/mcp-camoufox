@@ -9,9 +9,9 @@ from camoufox_mcp.sessions.page_book import PageBook
 from camoufox_mcp.sessions.quiet import quiet_stdio
 from camoufox_mcp.sessions.teardown import (
     CONTEXT_CLOSE_TIMEOUT,
-    DRIVER_STOP_TIMEOUT,
     TAB_CLOSE_TIMEOUT,
     quietly,
+    stop_driver,
 )
 
 if TYPE_CHECKING:
@@ -75,10 +75,12 @@ class Session:
             # own output swallowed too.
             with quiet_stdio():
                 context = await AsyncNewBrowser(pw, **kwargs)
-        except Exception:
-            if pw is not None:
-                await quietly("Playwright stop", pw.stop(), DRIVER_STOP_TIMEOUT)
-            cleanup_addons(addons_tmpdir)
+        except BaseException:
+            try:
+                if pw is not None:
+                    await stop_driver(pw)
+            finally:
+                cleanup_addons(addons_tmpdir)
             raise
 
         session = cls(profile=profile, playwright=pw, context=context, addons_tmpdir=addons_tmpdir)
@@ -121,11 +123,15 @@ class Session:
 
     async def close(self) -> None:
         """Stop the browser and the driver behind it. Bounded, and never raises."""
-        for page in self._pages.all_pages():
-            await quietly("Page close", page.close(), TAB_CLOSE_TIMEOUT)
-        await quietly("Context close", self._context.close(), CONTEXT_CLOSE_TIMEOUT)
-        await quietly("Playwright stop", self._pw.stop(), DRIVER_STOP_TIMEOUT)
-        cleanup_addons(self._addons_tmpdir)
+        try:
+            for page in self._pages.all_pages():
+                await quietly("Page close", page.close(), TAB_CLOSE_TIMEOUT)
+            await quietly("Context close", self._context.close(), CONTEXT_CLOSE_TIMEOUT)
+        finally:
+            try:
+                await stop_driver(self._pw)
+            finally:
+                cleanup_addons(self._addons_tmpdir)
 
     async def _open_initial_page(self) -> None:
         """Adopt the context's pages (or open one). Never sets a viewport size.
