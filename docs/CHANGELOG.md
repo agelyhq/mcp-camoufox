@@ -6,6 +6,41 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-10-07
+
+### Fixed
+
+- **The shared daemon exited under connected proxies.** Its idle TTL counted only requests,
+  so a proxy whose user was quiet for 30 minutes lost its daemon, and the next proxy to
+  start spawned another. Each proxy now holds a lease it renews every 30 s and releases on
+  exit; the daemon exits only once no lease is live, TTL seconds after the last one went,
+  and forgives the overdue leases a machine suspend leaves behind.
+- **A Windows proxy kept calling a dead daemon after any respawn.** It stored the first
+  daemon's port and token. Every request now resolves the advertised address and token.
+- **A daemon killed mid-request and replaced at once left the call hanging for 300 s.** A
+  different daemon answering is now proof that the call's daemon is gone.
+- **An observed action could read the page it was leaving.** When a navigation committed
+  late, `observe` returned the departing document without a `[page]` line, or an
+  "Execution context was destroyed" note. The observation now waits for the commit, bounded.
+- **A cancelled session close leaked the Playwright driver.** Its subprocess and the browser
+  behind it outlived the close ("Event loop is closed" at exit). The driver stop now
+  finishes even when the close is cancelled.
+
+### Changed
+
+- **The daemon serves stateless HTTP.** No MCP session id exists, so a replaced daemon can
+  no longer answer a proxy with 404 ("Unknown tool"). A replacement is reported once, from
+  the daemon identity each lease renewal returns, before the call is sent rather than after
+  it failed, and only by a call whose error the model reads: a list request never consumes
+  it. Every call in flight on the dead daemon fails with it, parallel calls included.
+- **A daemon with a connected proxy is never shut down unforced**, even when it holds no
+  browser: an upgraded proxy reuses it instead of replacing it, and `/shutdown` refuses.
+
+### Added
+
+- **`CAMOUFOX_DAEMON_LEASE_INTERVAL`** (default `30`), and `leases` and `closing` on
+  `/health`. A daemon that has decided to exit refuses new leases at once.
+
 ## [0.4.4] - 2026-10-07
 
 ### Fixed
@@ -962,7 +997,8 @@ backed by Camoufox, with per-profile session isolation.
 
 - The S3 profile sync stack. Profiles are local-disk only.
 
-[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.4...v0.4.5
 [0.4.4]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/agelyhq/mcp-camoufox/compare/v0.4.1...v0.4.2
