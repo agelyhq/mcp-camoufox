@@ -20,6 +20,14 @@ owns no browser and fail again for a second reason. The TTL accounting stays exa
 the same reason: the daemon counts in-flight requests, and no request is ever sent twice.
 A cancellation cannot strand that counter either, since the only request ever cancelled
 here is one whose daemon no longer exists.
+
+A daemon can also be replaced behind this proxy's back: it exits (idle TTL, crash) and
+another proxy sharing the address spawns a new one before this proxy notices. The new
+daemon answers ``/health``, so liveness alone calls every later failure genuine, while
+the cached backend session id belongs to the old process and draws a 404 on each call
+(surfacing as "Unknown tool"). The daemon instance the backend session was opened
+against is therefore remembered, and a failure against a different live instance is
+handled like a death: drop the stale backend, report once, and the next call works.
 """
 
 from __future__ import annotations
@@ -58,6 +66,9 @@ _RESPAWN_COOLDOWN_S = 5.0
 WATCH_INTERVAL_S = 2.0
 DEATH_CONFIRMATIONS = 2
 _LIVENESS_TIMEOUT_S = 2.0
+
+# One daemon process: its pid plus its start time, so a recycled pid is still told apart.
+DaemonInstance = tuple[object, object]
 
 
 class _DaemonVanishedError(Exception):
@@ -108,10 +119,16 @@ class DaemonRecovery:
         # seconds after boot would otherwise see its first respawn as a duplicate.
         self._last_attempt = float("-inf")
 
+    async def instance(self) -> DaemonInstance | None:
+        """The daemon process answering ``/health`` right now, or None when none does."""
+        health = await asyncio.to_thread(probe_health, self._config, self._endpoint)
+        if health is None:
+            return None
+        return (health.get("pid"), health.get("started_at"))
+
     async def is_live(self) -> bool:
         """True when the control channel still answers ``/health``."""
-        health = await asyncio.to_thread(probe_health, self._config, self._endpoint)
-        return health is not None
+        return await self.instance() is not None
 
     async def is_gone(self) -> bool:
         """True when the daemon is proven absent (see :func:`proven_gone`)."""
@@ -145,20 +162,27 @@ class DaemonRecoveryMiddleware(Middleware):
     def __init__(self, recovery: DaemonRecovery, client: StatefulProxyClient) -> None:
         self._recovery = recovery
         self._client = client
+        # The daemon the cached backend session belongs to; None until first observed.
+        self._bound: DaemonInstance | None = None
 
     async def on_message(
         self,
         context: Any,
         call_next: Callable[[Any], Awaitable[Any]],
     ) -> Any:
+        if self._bound is None:
+            self._bound = await self._recovery.instance()
         try:
             return await self._call_watched(context, call_next)
         except _DaemonVanishedError:
             raise await self._recover("it vanished holding an in-flight request") from None
         except Exception as exc:
-            if await self._recovery.is_live():
+            current = await self._recovery.instance()
+            if current is None:
+                raise await self._recover(f"the request failed with {type(exc).__name__}") from exc
+            if self._bound is None or current == self._bound:
                 raise
-            raise await self._recover(f"the request failed with {type(exc).__name__}") from exc
+            raise await self._replaced(current) from exc
 
     async def _call_watched(
         self,
@@ -194,12 +218,23 @@ class DaemonRecoveryMiddleware(Middleware):
         await self._drop_dead_backend()
         return _mcp_error(RESTARTED_MESSAGE)
 
+    async def _replaced(self, current: DaemonInstance) -> McpError:
+        """Another proxy already respawned the daemon: only the backend session is stale.
+
+        Not retried, for the same reason a respawn is not: the failed request may have
+        reached the old daemon before it went, and no request is ever sent twice.
+        """
+        logger.warning("Daemon %s was replaced by %s; reconnecting", self._bound, current)
+        await self._drop_dead_backend()
+        return _mcp_error(RESTARTED_MESSAGE)
+
     async def _drop_dead_backend(self) -> None:
         """Force-disconnect the cached backend session bound to the dead daemon.
 
         Without this the proxy keeps handing out a client whose MCP session id died
         with the old process, and the next call fails against the healthy daemon.
         """
+        self._bound = None
         try:
             await self._client.clear()
         except Exception:
