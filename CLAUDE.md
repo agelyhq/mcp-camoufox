@@ -157,8 +157,11 @@ differentiators, credits), never grows a reference section, and names no other p
   upstream, which is how this project silently moved 1 Firefox major.
 - Daemon is opt-in (`CAMOUFOX_DAEMON=true`); unset, the code path is byte-identical to
   single-process mode. The proxy owns no auto-update, telemetry or `SessionManager`. TTL
-  exits only at zero sessions AND zero in-flight requests. `daemon/endpoint.py` abstracts
-  the channel, `endpoint_unix.py` and `endpoint_loopback.py` implement it. Every exit is a
+  exits only at zero sessions, in-flight requests AND live proxy leases (`lease.py`). The
+  daemon is stateless HTTP, so a replacement is silent: the lease's `pid`/`started_at`
+  reports it, once, before the call. `daemon/endpoint.py` abstracts the channel,
+  `endpoint_unix.py`/`endpoint_loopback.py` implement it, `endpoint_resolving.py`
+  re-resolves the advert per request. Every exit is a
   signal that uvicorn re-raises, so NOTHING after `run_http_async` runs, `finally` included:
   cleanup goes in `lifecycle.cleanup_on_termination`. An advert is removed only by its
   proven owner, proof taken at `bind()`. Details in `docs/daemon.md`.

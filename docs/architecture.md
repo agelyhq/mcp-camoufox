@@ -33,8 +33,11 @@ src/camoufox_mcp/
                        target resolution with its per-call notes, secret redaction and
                        text helpers
   daemon/              optional shared daemon: proxy, spawn, lifecycle, routes, recovery,
-                       the endpoint abstraction with its unix and loopback strategies,
-                       socket path, identity, auth
+                       the endpoint abstraction with its unix and loopback strategies
+                       and the per-request resolving transport, proxy leases (lease
+                       table, lease routes, lease client, the proxy's lease and its
+                       heartbeat), suspend detection, socket path, identity, auth
+  config_daemon.py     pure parsers for the daemon variables
 ```
 
 Dependencies point inward: `tools/` uses `sessions/` and `dom/`, which use `config.py`.

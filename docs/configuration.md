@@ -28,7 +28,8 @@ out).
 | `CAMOUFOX_BROWSER_VERSION` | the tested build | Pins the browser build, for example `152.0.4-beta.28`. Set it to `latest`, or to an empty value, to follow whatever upstream published last, which is how an install can change Firefox major version without any change on your side. |
 | `CAMOUFOX_BINARY` | Camoufox's own cache | Explicit path to a Camoufox executable. It wins over `CAMOUFOX_BROWSER_VERSION`, so a path that does not exist is refused at startup by name instead of being worked around by a download the launch would ignore. |
 | `CAMOUFOX_DAEMON` | `false` | `true` routes everything through a shared daemon. See [daemon.md](daemon.md). |
-| `CAMOUFOX_DAEMON_TTL` | `1800` | Daemon idle shutdown, in seconds. Only meaningful with the daemon on. |
+| `CAMOUFOX_DAEMON_TTL` | `1800` | Daemon idle shutdown, in seconds, counted once no proxy holds a lease, no browser session is open and no request is in flight. Only meaningful with the daemon on. |
+| `CAMOUFOX_DAEMON_LEASE_INTERVAL` | `30` | Seconds between a proxy's lease renewals, above 0 and at most 300. A lease lapses after 3 missed intervals, so a proxy killed without a clean exit stops holding the daemon about 90 s later. Only meaningful with the daemon on. |
 
 ## 🪟 Window modes
 

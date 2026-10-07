@@ -163,7 +163,8 @@ The full suite measured on fastmcp 4.0.3 / mcp 2.2.0 fails 6 tests, none environ
   instructions, and `client.instructions` exposes them, so the doctrine is served: the
   test reads a field the new client no longer populates.
 
-**Follow-up, "fastmcp 4 migration"**: move the daemon's HTTP client to what mcp 2 ships
+**Follow-up, "fastmcp 4 migration"**: move the daemon's HTTP clients (including
+`daemon/endpoint_resolving.py` and `daemon/lease_client.py`) to what mcp 2 ships
 (or declare the client it needs, as pydantic is declared, never rely on a transitive
 again), read instructions through the fastmcp 4 client API in the 2 payload tests, run the
 whole suite on the new stack on 3.12 and 3.13, then raise the bound to `<5` and re-lock in
@@ -193,8 +194,35 @@ Sessions close when you call `close_session`, or when the process exits. Nothing
 evicts them on a timer. An agent that comes back to a tab twenty minutes later should
 find it where it left it.
 
-The daemon has its own idle TTL, but it only fires at zero active sessions and zero
-in-flight requests, so it never kills a live browser to hit a timeout.
+The daemon has its own idle TTL, but it only fires at zero active sessions, zero
+in-flight requests and zero live proxy leases, so it never kills a live browser to hit a
+timeout, nor leaves a connected proxy without a daemon.
+
+## Proxy leases and a stateless daemon
+
+Up to 0.4.4 the daemon's TTL counted only requests, so it exited under proxies that were
+connected but quiet (a Claude Code session idle for half an hour), and the next proxy to
+start spawned a new one. Every older proxy then held a backend MCP session id the new
+daemon had never issued: each call drew a 404, surfacing as "Unknown tool". 0.4.4 detected
+that after the fact. The fix removes both halves at the root.
+
+- **Leases.** Each proxy renews a lease every `CAMOUFOX_DAEMON_LEASE_INTERVAL` seconds
+  (`POST /lease`) and releases it on a clean exit (`DELETE /lease/{id}`); a lease lapses
+  after 3 missed intervals. The watchdog requires zero live leases, and counts its TTL from
+  the moment the last one went. A proxy chooses its own lease ttl, within `[1, 900]` s, so
+  proxies with different intervals share one daemon.
+- **Stateless HTTP.** The daemon runs `stateless_http=True`: no `Mcp-Session-Id` exists, so
+  a replaced daemon can no longer 404 a proxy. It makes no server-to-client requests, so the
+  GET stream it gives up carried nothing.
+- **The restart is still reported.** Statelessness makes a replacement silent, while the
+  browsers it held are gone. Every renewal returns the daemon's `pid` and `started_at`, a
+  change raises a notice, and the next request is failed once with the restart message
+  before it is forwarded.
+
+Kept from before: the respawn with its cooldown, the in-flight watchdog and its 2
+confirmations, and the rule that no request is ever replayed. A changed instance is now
+also proof of death for an in-flight request, which closes a 300 s hang when a daemon was
+killed mid-request and replaced by another proxy within 2 seconds.
 
 ## No file chooser interception
 

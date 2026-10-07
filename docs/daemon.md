@@ -63,12 +63,39 @@ This is a real difference in security posture, worth knowing: on POSIX the bound
 a file mode, on Windows it is a token, because directory permissions there are weaker.
 The spawn lock is cross-platform (`filelock`).
 
+The channel carries the MCP endpoint plus 3 control routes, all behind the same guard:
+`/health`, `/shutdown`, and `/lease` (`POST` to grant or renew, `DELETE /lease/{id}` to
+release). A lease id must be 32 lowercase hex digits and a ttl a positive number, clamped
+to `[1, 900]` seconds; at most 256 leases are held.
+
+The proxy never pins an address. Its HTTP clients (`daemon/endpoint_resolving.py`) resolve
+the advert as each request leaves and rewrite the URL and the token, so a proxy follows a
+respawned daemon to its new address. On Windows that is a new port and a new token every
+time, and a client built once would keep calling the dead one.
+
 ## ⏱️ Lifetime
 
-The daemon shuts itself down after `CAMOUFOX_DAEMON_TTL` seconds (default 1800), but
-**only** when there are zero active sessions and zero in-flight requests. It never
-closes a live browser to meet a timeout. A long-running session keeps it alive
-indefinitely, which is the intended behaviour.
+Every connected proxy holds a **lease** on the daemon. It renews it every
+`CAMOUFOX_DAEMON_LEASE_INTERVAL` seconds (default 30) with `POST /lease`, and releases it
+with `DELETE /lease/{id}` when it exits cleanly. A lease lapses after 3 missed intervals,
+which is how a proxy killed with `kill -9`, or by a SIGTERM that skips its shutdown, stops
+counting about 90 s later.
+
+The daemon shuts itself down only when ALL of these hold: no browser session is open, no
+request is in flight, no lease is live, and `CAMOUFOX_DAEMON_TTL` seconds (default 1800)
+have passed since the later of the last request and the moment the last lease was released
+or lapsed. So a connected proxy keeps its daemon however long its user is silent, a
+long-running session keeps it alive indefinitely, and a daemon nobody is connected to still
+goes, TTL seconds after the last proxy left. `/health` reports the live count as `leases`.
+
+**Sleep and resume.** A suspended machine freezes the proxies with the daemon, and on wake
+every lease looks overdue although nobody left. The daemon's watchdog compares the 2 clocks
+on every tick: Linux and macOS stop `CLOCK_MONOTONIC` during a suspend while the wall clock
+runs on, and Windows' monotonic clock keeps counting, so the tick itself is far too long.
+Either signature restarts every lease from now at its own ttl, so each proxy gets 1 full
+lease ttl to renew. The proxy's heartbeat wakes at least every 5 s and renews once either
+clock says an interval has passed, so it renews within 5 s of a wake even where the
+monotonic clock froze.
 
 ## 🚪 How it withdraws its advert
 
@@ -93,26 +120,55 @@ on 3.13. The tests assert on every advert file, the socket and the pointer both.
 
 The daemon advertises its version and code path on `/health`. A proxy running
 different code will shut down and respawn an **idle** daemon that does not match. If
-the mismatched daemon still holds live sessions, it is reused with a warning and never
-killed, because killing it would destroy someone's authenticated browser.
+the mismatched daemon still holds live sessions, or any proxy still holds a live lease on
+it, it is reused with a warning and never killed: killing it would destroy someone's
+authenticated browser, or report a restart to a conversation where nothing died. An
+unforced `/shutdown` is refused on the same two conditions.
 
 The proxy caches no tool list, so a code change is picked up at the next idle respawn.
 
 ## 🔁 When the daemon dies
 
-Recovery reacts to 2 different failures, because they look nothing alike.
+The daemon serves **stateless** HTTP: no MCP session id is ever issued, so there is nothing
+a replaced daemon could refuse with a 404. Before every request the proxy renews its lease,
+which proves a daemon is there and names the process answering (`pid` plus `started_at`).
 
-A daemon that dies **between** calls makes the next request raise, and the proxy respawns
-once, with a bounded retry and a 5 second cooldown so a burst of concurrent failures shares
-1 respawn.
+A daemon that is **gone** when a request starts (no advert, a refused connection, or a
+daemon answering that it is exiting) is respawned once, with a 5 second cooldown so a
+burst of concurrent failures shares 1 respawn, and the request fails with the restart
+message.
+
+A daemon that was **replaced** behind the proxy's back (it exited, another proxy spawned a
+new one) fails nothing on its own: the request would quietly land on a daemon that owns
+none of the conversation's browsers. The changed identity, seen by the heartbeat or by the
+pre-request renewal, is reported exactly once, before the request is forwarded, so "this
+call did not complete" is true. The following calls go through. One race remains: a
+replacement landing between that renewal and the forwarded request runs the call on the new
+daemon, and the next call reports it. Late by one call, never missed or reported twice.
+
+Only a request whose error the model reads delivers that report: a tool call, a resource
+read or a prompt get. A list request (`tools/list`, `resources/list`, ...) is sent by the
+client on its own and its error is never shown, so it is repaired silently, respawning the
+daemon if needed, and leaves the report pending for the next tool call. The opening
+`initialize` is repaired silently too and clears any pending report: a conversation that
+has not started has no browser to lose.
+
+A request already **in flight** remembers the daemon instance it was sent to. Every such
+request on a daemon that died fails with the restart message, however many parallel calls
+or earlier reports there were; the "exactly once" applies to calls that had not started.
+
+The idle watchdog refuses every new lease in the same step that decides to exit, and
+`/health` then reports `closing`. A proxy can therefore never be told a daemon is alive
+once that daemon has committed to going, and a proxy starting next to it waits for it to
+withdraw its advert before spawning a successor.
 
 A daemon that dies **while a request is in flight** raises nothing at all: the response
 simply never arrives, and no read timeout rescues it. So the proxy watches every
-outstanding request and probes the control channel between intervals. It cancels the call
-only on proof of death, meaning a refused connection or a withdrawn advert, confirmed twice
-2 seconds apart. A timeout is deliberately not proof: a cold browser launch can block the
-daemon's event loop for longer than a probe, and cancelling a healthy call is worse than
-waiting for a slow one. Detection costs about 2.4 seconds in practice.
+outstanding request and renews between intervals. It cancels the call on proof of death, a
+refused connection or a withdrawn advert confirmed twice 2 seconds apart, or at once when a
+different daemon answers. A timeout is deliberately not proof: a cold browser launch can
+block the daemon's event loop for longer than a probe, and cancelling a healthy call is
+worse than waiting for a slow one. Detection costs about 2.4 seconds in practice.
 
 Either way the live browsers are gone, and the error says so rather than pretending the
 session survived. The failed request is never replayed: it may have had side effects.
@@ -127,6 +183,9 @@ A daemon that is alive but wedged, still accepting connections and never answeri
 detected. Telling that apart from a daemon busy launching a browser needs a much longer
 bound than the one the watchdog uses, and a slow launch is far more common than a wedged
 loop, so the trade is deliberate.
+
+A proxy stopped by SIGTERM (rather than by its client closing stdin) skips its clean exit
+and never releases its lease, which then lapses after 3 intervals before the TTL starts.
 
 The Windows control channel is exercised by tests that drive its endpoint class on Linux.
 The class is covered; the platform is not, on this machine.
