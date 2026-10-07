@@ -15,7 +15,6 @@ from starlette.middleware import Middleware
 from camoufox_mcp.daemon import paths
 from camoufox_mcp.daemon.auth import TokenAuthMiddleware
 from camoufox_mcp.daemon.endpoint import (
-    DEFAULT_MCP_TIMEOUT,
     Bound,
     Conn,
     DaemonEndpoint,
@@ -23,7 +22,6 @@ from camoufox_mcp.daemon.endpoint import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
     from camoufox_mcp.config import ServerConfig
@@ -78,15 +76,8 @@ class LoopbackEndpoint(DaemonEndpoint):
     def _sync_transport(self, conn: Conn) -> httpx.BaseTransport:
         return httpx.HTTPTransport()
 
-    def mcp_client_factory(self, conn: Conn) -> Callable[..., httpx.AsyncClient]:
-        headers = conn.auth_headers
-
-        def factory(**kwargs: Any) -> httpx.AsyncClient:
-            kwargs.setdefault("timeout", DEFAULT_MCP_TIMEOUT)
-            kwargs["headers"] = {**headers, **(kwargs.get("headers") or {})}
-            return httpx.AsyncClient(**kwargs)
-
-        return factory
+    def async_transport(self, conn: Conn) -> httpx.AsyncBaseTransport:
+        return httpx.AsyncHTTPTransport()
 
 
 def _read_endpoint_file(path: Path) -> dict[str, Any] | None:

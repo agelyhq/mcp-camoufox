@@ -5,11 +5,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
 
-from camoufox_mcp.daemon.endpoint import DEFAULT_MCP_TIMEOUT, Bound, Conn, DaemonEndpoint
+from camoufox_mcp.daemon.endpoint import UNRESOLVED_BASE_URL, Bound, Conn, DaemonEndpoint
 from camoufox_mcp.daemon.socket_path import (
     address_pointer_path,
     check_socket_path,
@@ -21,11 +21,10 @@ from camoufox_mcp.daemon.socket_path import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from camoufox_mcp.config import ServerConfig
 
-_UDS_HOST = "http://camoufox-daemon"
+# The Unix transport ignores the host, so the placeholder doubles as the real one.
+_UDS_HOST = UNRESOLVED_BASE_URL
 # How long the daemon gives itself to tighten the socket after uvicorn creates it. Public
 # because the test harness waits on the same budget: a shorter one there would fail a daemon
 # that is still inside its own contract, which is how a loaded runner invents a defect.
@@ -91,11 +90,5 @@ class UnixSocketEndpoint(DaemonEndpoint):
     def _sync_transport(self, conn: Conn) -> httpx.BaseTransport:
         return httpx.HTTPTransport(uds=conn.socket_path)
 
-    def mcp_client_factory(self, conn: Conn) -> Callable[..., httpx.AsyncClient]:
-        socket_path = conn.socket_path
-
-        def factory(**kwargs: Any) -> httpx.AsyncClient:
-            kwargs.setdefault("timeout", DEFAULT_MCP_TIMEOUT)
-            return httpx.AsyncClient(transport=httpx.AsyncHTTPTransport(uds=socket_path), **kwargs)
-
-        return factory
+    def async_transport(self, conn: Conn) -> httpx.AsyncBaseTransport:
+        return httpx.AsyncHTTPTransport(uds=conn.socket_path)

@@ -32,22 +32,30 @@ def ensure_daemon(config: ServerConfig, endpoint: DaemonEndpoint) -> None:
     """Guarantee a code-matching daemon is listening before proxying.
 
     Runs at proxy start and again whenever a request finds the daemon gone. A healthy,
-    matching daemon is reused as-is; a healthy but mismatched idle daemon is shut down
-    and replaced; anything else is (re)spawned under an exclusive file lock so
-    concurrent proxies never double-spawn.
+    matching daemon is reused as-is; a mismatched daemon is shut down and replaced only
+    when idle, meaning no browser session AND no connected proxy holding a lease; a
+    daemon already exiting is waited out; anything else is (re)spawned under an
+    exclusive file lock so concurrent proxies never double-spawn.
     """
     identity = local_identity(config)
     health = probe_health(config, endpoint)
     if health is not None:
-        if identity.matches(health):
+        if _closing(health):
+            logger.info("The daemon is exiting; waiting for it to withdraw its advert")
+        elif identity.matches(health):
             return
-        if int(health.get("active_sessions", 0)) > 0:
-            _warn_reusing_mismatched("has active sessions")
+        elif int(health.get("active_sessions", 0)) > 0 or int(health.get("leases", 0)) > 0:
+            _warn_reusing_mismatched("has active sessions or connected proxies")
             return
-        logger.info("Replacing idle mismatched daemon")
-        _request_shutdown(config, endpoint)
+        else:
+            logger.info("Replacing idle mismatched daemon")
+            _request_shutdown(config, endpoint)
         _wait_unpublished(config, endpoint)
     spawn_locked(config, endpoint, identity)
+
+
+def _closing(health: dict) -> bool:
+    return health.get("closing") is True
 
 
 def _warn_reusing_mismatched(reason: str) -> None:
@@ -111,7 +119,7 @@ def spawn_locked(config: ServerConfig, endpoint: DaemonEndpoint, identity: Daemo
     try:
         # Another proxy may have spawned a matching daemon while we waited.
         health = probe_health(config, endpoint)
-        if health is not None and identity.matches(health):
+        if health is not None and identity.matches(health) and not _closing(health):
             return
         if not _reclaim_advert(config, endpoint):
             _warn_reusing_mismatched("it still answers on the control channel")

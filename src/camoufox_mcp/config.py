@@ -6,6 +6,7 @@ from pathlib import Path
 
 from platformdirs import user_data_dir
 
+from camoufox_mcp.config_daemon import parse_daemon_ttl, parse_lease_interval
 from camoufox_mcp.proxy_url import parse_proxy
 from camoufox_mcp.session_defaults import SessionDefaults
 
@@ -103,6 +104,7 @@ class ServerConfig:
     session_defaults: SessionDefaults
     daemon_enabled: bool
     daemon_ttl_seconds: int
+    daemon_lease_interval_seconds: float
 
     @property
     def geoip_forced(self) -> bool:
@@ -185,7 +187,10 @@ class ServerConfig:
             humanize=_parse_humanize(os.getenv("CAMOUFOX_HUMANIZE")),
             session_defaults=_parse_session_defaults(),
             daemon_enabled=(os.getenv("CAMOUFOX_DAEMON", "false").lower() == "true"),
-            daemon_ttl_seconds=_parse_ttl(os.getenv("CAMOUFOX_DAEMON_TTL")),
+            daemon_ttl_seconds=parse_daemon_ttl(os.getenv("CAMOUFOX_DAEMON_TTL")),
+            daemon_lease_interval_seconds=parse_lease_interval(
+                os.getenv("CAMOUFOX_DAEMON_LEASE_INTERVAL")
+            ),
         )
 
 
@@ -242,20 +247,6 @@ def _parse_humanize(raw: str | None) -> float | None:
         ) from exc
     if value <= 0:
         raise ValueError(f"Invalid CAMOUFOX_HUMANIZE={raw!r}; must be > 0")
-    return value
-
-
-def _parse_ttl(raw: str | None) -> int:
-    if raw is None or raw.strip() == "":
-        return 1800
-    try:
-        value = int(raw.strip())
-    except ValueError as exc:
-        raise ValueError(
-            f"Invalid CAMOUFOX_DAEMON_TTL={raw!r}; expected a positive integer"
-        ) from exc
-    if value <= 0:
-        raise ValueError(f"Invalid CAMOUFOX_DAEMON_TTL={raw!r}; must be > 0")
     return value
 
 

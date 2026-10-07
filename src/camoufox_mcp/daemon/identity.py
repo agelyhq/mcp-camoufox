@@ -58,6 +58,34 @@ class DaemonIdentity:
         }
 
 
+@dataclass(frozen=True)
+class DaemonInstance:
+    """One daemon process: its pid plus its start time, so a recycled pid is told apart.
+
+    Where :class:`DaemonIdentity` says whether a daemon runs the same code, this says
+    whether it is the same PROCESS. Both ``/health`` and ``/lease`` publish it, and a
+    proxy that sees it change knows the daemon it was talking to is gone.
+    """
+
+    pid: int
+    started_at: str
+
+    @classmethod
+    def from_payload(cls, payload: object) -> DaemonInstance | None:
+        """The instance a ``/health`` or ``/lease`` reply names, or None when malformed."""
+        if not isinstance(payload, dict):
+            return None
+        pid = payload.get("pid")
+        started_at = payload.get("started_at")
+        if not isinstance(pid, int) or isinstance(pid, bool) or not isinstance(started_at, str):
+            return None
+        return cls(pid=pid, started_at=started_at)
+
+    def as_payload(self) -> dict[str, object]:
+        """The fields as published on the control channel."""
+        return {"pid": self.pid, "started_at": self.started_at}
+
+
 def local_identity(config: ServerConfig) -> DaemonIdentity:
     """Identity of the code and configuration running in this process."""
     return DaemonIdentity(

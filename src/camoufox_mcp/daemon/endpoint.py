@@ -22,7 +22,6 @@ import httpx
 
 if TYPE_CHECKING:
     import socket
-    from collections.abc import Callable
     from pathlib import Path
 
     from starlette.middleware import Middleware
@@ -33,6 +32,10 @@ IS_WINDOWS = os.name == "nt"
 
 _MCP_PATH = "/mcp"
 DEFAULT_MCP_TIMEOUT = httpx.Timeout(30.0, read=300.0)
+# The host a long-lived proxy client is built with. Never dialled: the resolving
+# transport rewrites every request to the advertised address (and on POSIX the Unix
+# transport ignores the host anyway).
+UNRESOLVED_BASE_URL = "http://camoufox-daemon"
 
 
 def publish_advert(path: Path, text: str) -> None:
@@ -154,8 +157,13 @@ class DaemonEndpoint(ABC):
     def _sync_transport(self, conn: Conn) -> httpx.BaseTransport: ...
 
     @abstractmethod
-    def mcp_client_factory(self, conn: Conn) -> Callable[..., httpx.AsyncClient]:
-        """Async-client factory for the proxy's ``StreamableHttpTransport``."""
+    def async_transport(self, conn: Conn) -> httpx.AsyncBaseTransport:
+        """A bare async transport reaching ``conn``; addressing and auth are the caller's.
+
+        Used only by :class:`~camoufox_mcp.daemon.endpoint_resolving.ResolvingAsyncTransport`,
+        which resolves the advert again on every request and rewrites the URL and the
+        token itself, so a long-lived client follows a respawned daemon.
+        """
 
     def sync_client(self, conn: Conn, timeout: float = 2.0) -> httpx.Client:
         return httpx.Client(
@@ -165,8 +173,14 @@ class DaemonEndpoint(ABC):
             timeout=timeout,
         )
 
-    def mcp_url(self, conn: Conn) -> str:
-        return f"{conn.base_url}{_MCP_PATH}"
+
+def mcp_url() -> str:
+    """The MCP endpoint as the proxy's client addresses it, before resolution.
+
+    A constant: the host is a placeholder the resolving transport replaces with
+    whatever daemon is advertised when each request leaves.
+    """
+    return f"{UNRESOLVED_BASE_URL}{_MCP_PATH}"
 
 
 def select_endpoint() -> DaemonEndpoint:

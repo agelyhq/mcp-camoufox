@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp.server.middleware import Middleware
 
+from camoufox_mcp.daemon.suspend import SuspendDetector
 from camoufox_mcp.telemetry import now_iso
 
 if TYPE_CHECKING:
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from types import FrameType
 
     from camoufox_mcp.config import ServerConfig
+    from camoufox_mcp.daemon.leases import LeaseTable
     from camoufox_mcp.sessions import SessionManager
 
 logger = logging.getLogger(__name__)
@@ -34,13 +36,14 @@ _TERMINATION_SIGNALS = tuple(
 class ActivityState:
     """Mutable liveness state shared by the middleware, watchdog and /health route."""
 
-    def __init__(self) -> None:
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
         self.started_at: str = now_iso()
-        self.last_activity: float = time.monotonic()
+        self.last_activity: float = clock()
         self.inflight: int = 0
 
     def touch(self) -> None:
-        self.last_activity = time.monotonic()
+        self.last_activity = self._clock()
 
 
 class ActivityTracker(Middleware):
@@ -125,14 +128,46 @@ async def idle_watchdog(
     config: ServerConfig,
     sessions: SessionManager,
     state: ActivityState,
+    leases: LeaseTable,
+    *,
+    mono: Callable[[], float] = time.monotonic,
+    wall: Callable[[], float] = time.time,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    terminate: Callable[[float], None] = schedule_self_terminate,
 ) -> None:
-    """Terminate the daemon once it has been idle (no sessions, no traffic) past TTL."""
+    """Terminate the daemon once nobody has needed it for its whole TTL.
+
+    It exits only when no browser session is open, no request is in flight, no proxy
+    holds a live lease, AND the TTL has passed since the later of the last request and
+    the moment the last lease was released or expired. A connected proxy keeps its
+    daemon however long its user is silent; a daemon nobody is connected to still goes.
+
+    ``mono``, ``state`` and ``leases`` must share one clock. After a suspend (see
+    :class:`SuspendDetector`) the check is skipped once and every lease and the activity
+    stamp restart from now, so proxies frozen with the machine get 1 full lease ttl to
+    renew before their absence counts.
+    """
     ttl = config.daemon_ttl_seconds
     interval = max(_MIN_CHECK_INTERVAL_S, min(_MAX_CHECK_INTERVAL_S, ttl / 4))
+    suspend = SuspendDetector(interval, mono=mono, wall=wall)
     while True:
-        await asyncio.sleep(interval)
-        idle_for = time.monotonic() - state.last_activity
-        if sessions.active_count() == 0 and state.inflight == 0 and idle_for > ttl:
+        await sleep(interval)
+        if suspend.tick():
+            logger.info("Daemon resumed from a suspend; every lease gets a fresh ttl")
+            leases.refresh_all()
+            state.touch()
+            continue
+        if sessions.active_count() or state.inflight or leases.live_count():
+            continue
+        vacated_at = leases.vacated_at()
+        quiet_since = (
+            state.last_activity if vacated_at is None else max(state.last_activity, vacated_at)
+        )
+        idle_for = mono() - quiet_since
+        if idle_for > ttl:
             logger.info("Daemon idle for %.0fs (ttl=%ss); shutting down", idle_for, ttl)
-            schedule_self_terminate(0.0)
+            # Same step as the decision, no await between: from here no proxy can be
+            # granted a lease, so none is ever told this daemon is alive (see LeaseTable).
+            leases.close()
+            terminate(0.0)
             return

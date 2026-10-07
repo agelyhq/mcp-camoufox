@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import sys
 from functools import partial
 from typing import TYPE_CHECKING
@@ -11,7 +12,9 @@ from camoufox_mcp.bootstrap import build_deps, build_server
 from camoufox_mcp.config import ServerConfig
 from camoufox_mcp.daemon import paths
 from camoufox_mcp.daemon.endpoint import select_endpoint
-from camoufox_mcp.daemon.identity import local_identity
+from camoufox_mcp.daemon.identity import DaemonInstance, local_identity
+from camoufox_mcp.daemon.lease_routes import register_lease_routes
+from camoufox_mcp.daemon.leases import LeaseTable
 from camoufox_mcp.daemon.lifecycle import (
     ActivityState,
     ActivityTracker,
@@ -54,15 +57,23 @@ async def _serve(config: ServerConfig) -> None:
         deps = build_deps(config)
         mcp: FastMCP = build_server(config, deps=deps)
         state = ActivityState()
-        register_daemon_routes(mcp, local_identity(config), deps.sessions, state)
+        leases = LeaseTable()
+        instance = DaemonInstance(pid=os.getpid(), started_at=state.started_at)
+        register_daemon_routes(mcp, local_identity(config), instance, deps.sessions, leases)
+        register_lease_routes(mcp, leases, instance)
         mcp.add_middleware(ActivityTracker(state))
 
-        watchdog = asyncio.create_task(idle_watchdog(config, deps.sessions, state))
+        watchdog = asyncio.create_task(idle_watchdog(config, deps.sessions, state, leases))
         harden = asyncio.create_task(endpoint.harden_when_ready(config))
         try:
+            # Stateless: no Mcp-Session-Id is ever issued, so a proxy whose daemon was
+            # replaced holds no session id the new one would answer with a 404. The
+            # daemon makes no server-to-client requests, so the GET stream this gives
+            # up carried nothing. See docs/daemon.md, "When the daemon dies".
             await mcp.run_http_async(
                 transport="http",
                 show_banner=False,
+                stateless_http=True,
                 host_origin_protection=False,
                 middleware=bound.middleware,
                 **bound.run_kwargs,

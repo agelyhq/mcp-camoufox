@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from typing import TYPE_CHECKING
 
 from fastmcp.client.transports import StreamableHttpTransport
@@ -10,8 +11,10 @@ from fastmcp.server.providers.proxy import (
 )
 
 from camoufox_mcp.bootstrap import SERVER_INSTRUCTIONS, SERVER_NAME
-from camoufox_mcp.daemon.endpoint import select_endpoint
-from camoufox_mcp.daemon.errors import DaemonSpawnError
+from camoufox_mcp.daemon.endpoint import mcp_url, select_endpoint
+from camoufox_mcp.daemon.endpoint_resolving import mcp_client_factory
+from camoufox_mcp.daemon.lease import LEASE_TTL_FACTOR, DaemonLease
+from camoufox_mcp.daemon.lease_client import LeaseClient
 from camoufox_mcp.daemon.recovery import DaemonRecovery, DaemonRecoveryMiddleware
 from camoufox_mcp.daemon.spawn import ensure_daemon
 
@@ -52,31 +55,36 @@ def build_proxy(config: ServerConfig, endpoint: DaemonEndpoint) -> FastMCP:
     proxy never serves a stale tool list after a daemon code reload, and a recovery
     middleware that respawns a daemon which dies mid-conversation. The transport
     (Unix socket on POSIX, authenticated loopback on Windows) is supplied by the
-    injected ``endpoint``.
+    injected ``endpoint`` and resolved again on every request, so the proxy follows a
+    respawned daemon to its new address. The server's lifespan holds this proxy's
+    lease on the daemon (see :mod:`camoufox_mcp.daemon.lease`).
     """
-    conn = endpoint.resolve(config)
-    if conn is None:
-        raise DaemonSpawnError("daemon endpoint disappeared after ensure_daemon")
     transport = StreamableHttpTransport(
-        endpoint.mcp_url(conn),
-        httpx_client_factory=endpoint.mcp_client_factory(conn),
+        mcp_url(),
+        httpx_client_factory=mcp_client_factory(endpoint, config),
     )
     client = StatefulProxyClient(transport)
+    interval_s = config.daemon_lease_interval_seconds
+    lease = DaemonLease(
+        LeaseClient(config, endpoint, secrets.token_hex(16), LEASE_TTL_FACTOR * interval_s),
+        interval_s,
+    )
     proxy = FastMCPProxy(
         client_factory=client.new_stateful,
         name=SERVER_NAME,
         instructions=SERVER_INSTRUCTIONS,
+        lifespan=lease.lifespan,
     )
     _disable_list_cache(proxy)
-    _install_recovery(proxy, config, endpoint, client)
+    _install_recovery(proxy, DaemonRecovery(config, endpoint, lease), client, lease)
     return proxy
 
 
 def _install_recovery(
     proxy: FastMCPProxy,
-    config: ServerConfig,
-    endpoint: DaemonEndpoint,
+    recovery: DaemonRecovery,
     client: StatefulProxyClient,
+    lease: DaemonLease,
 ) -> None:
     """Put the recovery middleware outermost, ahead of fastmcp's own proxy middleware.
 
@@ -85,7 +93,7 @@ def _install_recovery(
     ``on_initialize`` hook. Appending would leave that connect attempt (the very
     first thing a dead daemon breaks) outside our reach, so we insert at the front.
     """
-    proxy.middleware.insert(0, DaemonRecoveryMiddleware(DaemonRecovery(config, endpoint), client))
+    proxy.middleware.insert(0, DaemonRecoveryMiddleware(recovery, client, lease))
 
 
 def _disable_list_cache(proxy: FastMCPProxy) -> None:
