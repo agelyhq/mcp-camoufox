@@ -53,6 +53,7 @@ _OPTIONAL_ENV_VARS = (
     "CAMOUFOX_FINGERPRINT_OS",
     "CAMOUFOX_VIEWPORT",
     "CAMOUFOX_LOCALE",
+    "CAMOUFOX_DAEMON_LEASE_INTERVAL",
 )
 
 
@@ -61,7 +62,7 @@ def isolate_camoufox_env(monkeypatch: pytest.MonkeyPatch, data_dir: Path, **over
 
     Applies auto_update=false plus the data dir, then any ``overrides`` (full env var
     names, e.g. ``CAMOUFOX_HEADLESS="virtual"``), and finally deletes the optional
-    per-session vars so the host environment never leaks.
+    vars no override set, so the host environment never leaks.
 
     ``CAMOUFOX_HEADLESS`` is the one inherited var kept on purpose: it defaults to
     ``"true"`` so a bare run is deterministic and display-less, but an ambient value is
@@ -79,7 +80,8 @@ def isolate_camoufox_env(monkeypatch: pytest.MonkeyPatch, data_dir: Path, **over
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     for var in _OPTIONAL_ENV_VARS:
-        monkeypatch.delenv(var, raising=False)
+        if var not in overrides:
+            monkeypatch.delenv(var, raising=False)
 
 
 def server_for(monkeypatch: pytest.MonkeyPatch, data_dir: Path, **env: str) -> FastMCP:

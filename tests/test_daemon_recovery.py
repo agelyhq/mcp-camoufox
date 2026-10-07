@@ -11,8 +11,10 @@ from fastmcp import Client
 
 from camoufox_mcp.config import ServerConfig
 from camoufox_mcp.daemon import recovery, spawn
+from camoufox_mcp.daemon.lease_client import Alive, LeaseClient
 from camoufox_mcp.daemon.proxy import build_proxy
 from camoufox_mcp.daemon.spawn import ensure_daemon, probe_health
+from tests.daemon_calls import session_registered, verdict_within
 from tests.daemon_harness import (
     ENDPOINT,
     Harness,
@@ -24,12 +26,12 @@ from tests.daemon_harness import (
     wait_gone,
 )
 from tests.helpers import tool_text
-from tests.waits import poll_until
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from camoufox_mcp.daemon.endpoint import DaemonEndpoint
+    from camoufox_mcp.daemon.lease_client import Probe
 
 # How long the caller may wait, after the daemon dies, for a verdict on a request that
 # was in flight when it died. Detection costs 2 liveness probes (see recovery.py) and
@@ -165,16 +167,16 @@ async def test_daemon_death_mid_request_is_reported_in_bounded_time(
                 },
             )
         )
-        assert await _session_registered(cfg), "the slow navigate never reached the daemon"
+        assert await session_registered(cfg), "the slow navigate never reached the daemon"
 
         hard_kill(old_pid)
         assert await asyncio.to_thread(wait_gone, cfg), daemon_diagnostics(
             cfg, "the daemon survived SIGKILL"
         )
 
-        # The budget is enforced by _verdict_within, which fails the test on expiry;
+        # The budget is enforced by verdict_within, which fails the test on expiry;
         # re-measuring the same window here could only ever fail on a slow machine.
-        message = await _verdict_within(call, _INFLIGHT_VERDICT_BUDGET_S)
+        message = await verdict_within(call, _INFLIGHT_VERDICT_BUDGET_S)
         # The exact message, not keywords: UNRECOVERED_MESSAGE also says "restarted",
         # so a substring check would accept a failed respawn as a success here.
         assert message == recovery.RESTARTED_MESSAGE
@@ -204,10 +206,13 @@ async def test_a_slow_call_on_a_healthy_daemon_is_never_cancelled(
     assert health is not None
     daemon_env.track(int(health["pid"]))
 
-    probes = _counted_liveness_probes(monkeypatch)
-
+    # Renewals double as the watchdog's probes, so the heartbeat is pushed out of the
+    # window: every probe counted below is then one the outstanding call asked for.
+    monkeypatch.setenv("CAMOUFOX_DAEMON_LEASE_INTERVAL", "300")
+    cfg = ServerConfig.from_env()
     seconds = 5 * recovery.WATCH_INTERVAL_S
     async with Client(build_proxy(cfg, ENDPOINT)) as proxy:
+        probes = _counted_liveness_probes(monkeypatch)
         result = tool_text(
             await proxy.call_tool(
                 "navigate",
@@ -223,65 +228,29 @@ async def test_a_slow_call_on_a_healthy_daemon_is_never_cancelled(
     # accept backlog clears in milliseconds), which is why it demands 2 in a row. The
     # returned result is the proof that no such run was ever reached.
     assert "Navigated to:" in result
-    assert len(probes) > recovery.DEATH_CONFIRMATIONS, (
-        f"the call was probed {len(probes)} times, too few to prove the watchdog let a "
+    # The first renewal is the pre-forward check, not the watchdog.
+    watched = probes[1:]
+    assert len(watched) > recovery.DEATH_CONFIRMATIONS, (
+        f"the call was probed {len(watched)} times, too few to prove the watchdog let a "
         "healthy daemon's call run past the point where it condemns a dead one"
     )
+    assert all(isinstance(probe, Alive) for probe in probes), probes
 
 
-def _counted_liveness_probes(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
-    """Record every watchdog liveness probe, and its answer, as it happens.
+def _counted_liveness_probes(monkeypatch: pytest.MonkeyPatch) -> list[Probe]:
+    """Record every lease renewal, and what it proved, as it happens.
 
-    ``proven_gone`` is the only thing ``_call_watched`` consults, so the length of
-    this list is exactly how many times the watchdog asked whether the daemon holding
-    the outstanding call still existed. Appending from the worker thread
-    ``asyncio.to_thread`` runs it on is safe: list.append is atomic.
+    A renewal is the only thing ``_call_watched`` consults, so with the heartbeat out of
+    the way the length of this list is exactly how many times the proxy asked whether
+    the daemon holding the outstanding call still existed.
     """
-    real_probe = recovery.proven_gone
-    answers: list[bool] = []
+    real_renew = LeaseClient.renew
+    answers: list[Probe] = []
 
-    def counting_probe(config: ServerConfig, endpoint: DaemonEndpoint) -> bool:
-        gone = real_probe(config, endpoint)
-        answers.append(gone)
-        return gone
+    async def counting_renew(self: LeaseClient) -> Probe:
+        probe = await real_renew(self)
+        answers.append(probe)
+        return probe
 
-    monkeypatch.setattr(recovery, "proven_gone", counting_probe)
+    monkeypatch.setattr(LeaseClient, "renew", counting_renew)
     return answers
-
-
-async def _session_registered(cfg: ServerConfig, deadline: float = 60.0) -> bool:
-    """Block until the daemon reports the session the in-flight call just created.
-
-    Proof that the request really is in flight, rather than a sleep long enough to
-    probably be: ``navigate`` registers the session before it starts loading the URL,
-    so ``active_sessions == 1`` means the call is inside the daemon and still running.
-    Without this the kill could land before the request was even sent, silently
-    degrading this test into the between-calls case that already passes.
-    """
-
-    async def health() -> dict | None:
-        return await asyncio.to_thread(probe_health, cfg, ENDPOINT)
-
-    _, registered = await poll_until(
-        health,
-        lambda h: h is not None and int(h["active_sessions"]) >= 1,
-        deadline=deadline,
-        interval=0.1,
-    )
-    return registered
-
-
-async def _verdict_within(call: asyncio.Future, budget: float) -> str:
-    """The failure message the in-flight call ends with, within ``budget`` seconds.
-
-    The hang IS the defect, so it must never be mistaken for the expected error: a
-    ``pytest.raises(Exception)`` would happily accept the ``TimeoutError`` that a hang
-    produces here and report a pass.
-    """
-    try:
-        await asyncio.wait_for(call, timeout=budget)
-    except TimeoutError:
-        pytest.fail(f"the call was still in flight {budget:.0f}s after the daemon died")
-    except Exception as exc:
-        return str(exc)
-    pytest.fail("the call returned a result from a daemon that no longer exists")

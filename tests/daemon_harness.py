@@ -45,6 +45,10 @@ _LOG_SCAN_LINES = 200
 # proxy build theirs. Every daemon helper takes it as an argument.
 ENDPOINT = select_endpoint()
 
+# Short enough that a lease a test abandons expires within its patience (the ttl is 3
+# intervals), long enough that a loaded runner still renews well inside it.
+LEASE_INTERVAL_S = 0.5
+
 
 class Harness:
     """Holds the address-bearing config so teardown can always reach the daemon.
@@ -75,7 +79,12 @@ def daemon_session(
     so no test hand-rolls the teardown.
     """
     root = Path(tempfile.mkdtemp(prefix="cfxd-")) if data_dir is None else data_dir
-    isolate_camoufox_env(monkeypatch, root, CAMOUFOX_DAEMON_TTL="60")
+    isolate_camoufox_env(
+        monkeypatch,
+        root,
+        CAMOUFOX_DAEMON_TTL="60",
+        CAMOUFOX_DAEMON_LEASE_INTERVAL=str(LEASE_INTERVAL_S),
+    )
 
     harness = Harness(ServerConfig.from_env())
     try:
@@ -216,6 +225,16 @@ def hard_kill(pid: int) -> None:
 
 def wait_gone(cfg: ServerConfig, deadline: float = 15.0) -> bool:
     return poll_until_sync(lambda: probe_health(cfg, ENDPOINT) is None, deadline=deadline)
+
+
+def lease_count(cfg: ServerConfig) -> int | None:
+    """Live leases the advertised daemon reports on ``/health``; None when none answers."""
+    health = probe_health(cfg, ENDPOINT)
+    return None if health is None else int(health["leases"])
+
+
+def wait_leases(cfg: ServerConfig, count: int, deadline: float = 10.0) -> bool:
+    return poll_until_sync(lambda: lease_count(cfg) == count, deadline=deadline, interval=0.05)
 
 
 def wait_advert_gone(cfg: ServerConfig, deadline: float = 10.0) -> bool:

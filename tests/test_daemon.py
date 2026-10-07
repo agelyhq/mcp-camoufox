@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
@@ -148,6 +149,30 @@ async def test_active_mismatch_is_reused_not_killed(
     assert after is not None
     assert after["started_at"] == before["started_at"]  # same process, never respawned
     assert after["active_sessions"] == 1
+
+
+async def test_a_leased_mismatch_is_neither_replaced_nor_shut_down(
+    daemon_env: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A connected proxy with no browser open still owns its daemon: an upgraded proxy
+    starting next to it must not tear it down and report a restart nobody caused."""
+    cfg = ServerConfig.from_env()
+    ensure_daemon(cfg, ENDPOINT)
+
+    async with Client(build_proxy(cfg, ENDPOINT)):
+        before = probe_health(cfg, ENDPOINT)
+        assert before is not None
+        assert (before["active_sessions"], before["leases"]) == (0, 1)
+
+        with control_client(cfg) as client:
+            assert client.post("/shutdown").status_code == 409  # unforced
+
+        monkeypatch.setattr(spawn, "local_identity", mismatched_identity)
+        await asyncio.to_thread(ensure_daemon, cfg, ENDPOINT)
+
+        after = probe_health(cfg, ENDPOINT)
+        assert after is not None
+        assert after["started_at"] == before["started_at"]  # same process, never replaced
 
 
 async def test_shutdown_refused_while_sessions_active(
