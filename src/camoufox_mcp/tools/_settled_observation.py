@@ -7,6 +7,9 @@ tab did not move again while it was being read.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import time
 from typing import TYPE_CHECKING
 
 from camoufox_mcp.tools._errors import log_swallowed
@@ -22,6 +25,22 @@ if TYPE_CHECKING:
 # already recorded, so it costs nothing on a loaded document and adds no listener,
 # no selector engine and nothing observable to the page.
 _READY_BUDGET_MS = 1500
+
+logger = logging.getLogger(__name__)
+
+# The "[page]" line gives up on a navigation that has not committed within its own
+# budget, a trade made for actions nobody asked to observe. An observation cannot make
+# it: capturing then reads the document being replaced, and the result is either that
+# departed page's content with no "[page]" line or an "Execution context was destroyed"
+# note (measured: 5 of 40 navigating clicks under CPU contention, commits landing
+# 1.5 s+ after the click). So an observation waits for the commit as long as the
+# server has not answered, up to _COMMIT_CAP_S, a slow site's time to first byte; once
+# it has answered, the commit is a browser-local hop, yet one that took over 1.5 s on 2
+# of 40 clicks under 3x CPU oversubscription, hence _COMMIT_AFTER_ANSWER_S. An answer
+# that never commits (a 204, a download) costs an observed action that much, no more.
+_COMMIT_CAP_S = 10.0
+_COMMIT_AFTER_ANSWER_S = 5.0
+_POLL_INTERVAL_S = 0.01
 
 # What the caller is told when the tab keeps navigating through both capture
 # attempts, a chain of redirects above all. Silence would be worse: it asked to be
@@ -52,15 +71,43 @@ async def settled_observation(page: Page, tool: str, mode: str | None) -> str:
     """
     if not mode or mode == "none":
         return ""
+    mark = page.doc_mark
     await _settled_document(page, tool)
-    at_capture = page.url
-    block = await observe_suffix(page, mode)
-    if page.url == at_capture:
-        return block
-    await _document_ready(page)
-    at_capture = page.url
-    block = await observe_suffix(page, mode)
-    return block if page.url == at_capture else KEPT_MOVING
+    if mark is not None:
+        await _committed(page, mark)
+        await _document_ready(page)
+    for _ in range(2):
+        before = _position(page)
+        block = await observe_suffix(page, mode)
+        if _position(page) == before:
+            return block
+        # The tab moved, or asked for a new document, while it was being read: a
+        # request first seen here is a navigation that missed the evidence window.
+        await _committed(page, before[1])
+        await _document_ready(page)
+    return KEPT_MOVING
+
+
+def _position(page: Page) -> tuple[str, int]:
+    """Where the tab is, and the newest document it has asked for."""
+    return page.url, page.network.last_document_reqid
+
+
+async def _committed(page: Page, mark: int) -> None:
+    """Wait for a navigation started after ``mark`` to commit, bounded as stated above."""
+    started = last_unanswered = time.monotonic()
+    network = page.network
+    while network.last_document_reqid > mark:
+        pending, unanswered = network.awaiting_commit()
+        now = time.monotonic()
+        if unanswered:
+            last_unanswered = now
+        if not pending or now - started >= _COMMIT_CAP_S:
+            return
+        if now - last_unanswered >= _COMMIT_AFTER_ANSWER_S:
+            logger.debug("observation: document answered but not committed, capturing anyway")
+            return
+        await asyncio.sleep(_POLL_INTERVAL_S)
 
 
 async def _settled_document(page: Page, tool: str) -> None:

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from camoufox_mcp.dom.registry import ElementRegistry
 from camoufox_mcp.sessions.errors import PLAYWRIGHT_ERROR, PLAYWRIGHT_TARGET_CLOSED_ERROR
+from camoufox_mcp.sessions.network import NetworkMonitor
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -152,9 +153,12 @@ class RestlessTab:
 
     def __init__(self) -> None:
         self.captures = 0
-        # The 2 reporting fields the real Page carries for the settling wait.
+        # The 2 reporting fields the real Page carries for the settling wait, and the
+        # monitor the observation reads for a document request. Never attached: the
+        # moves this tab makes come with no request, like a same-document history move.
         self.shown_url: str | None = None
         self.doc_mark: int | None = None
+        self.network = NetworkMonitor()
 
     @property
     def url(self) -> str:

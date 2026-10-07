@@ -79,6 +79,8 @@ class NetworkMonitor:
         # copy and re-filter the whole ring on every poll tick. Never reset: ids only
         # grow, so the newest document request stays the highest across a rotation.
         self._last_document_reqid = -1
+        # The entry behind _last_document_reqid, read for its status by the commit wait.
+        self._last_document: NetworkEntry | None = None
         # The rotation boundary, and the reason it is the FIRST main-frame document
         # request since the last rotation rather than the last one: see _rotate.
         self._first_document_since_rotation: int | None = None
@@ -152,6 +154,7 @@ class NetworkMonitor:
         # neither a rotation boundary nor evidence that the tab is navigating.
         if entry.resource_type == "document" and is_main_frame_request(request):
             self._last_document_reqid = entry.reqid
+            self._last_document = entry
             if self._first_document_since_rotation is None:
                 self._first_document_since_rotation = entry.reqid
 
@@ -179,6 +182,18 @@ class NetworkMonitor:
         settling wait in ``tools/_page_line.py`` would otherwise read as the tab moving.
         """
         return self._last_document_reqid
+
+    def awaiting_commit(self) -> tuple[bool, bool]:
+        """Whether a tab navigation is under way, and whether its server is still to answer.
+
+        The first value is True from a main-frame document request until the commit
+        that rotates the log; the second is True while the newest such request has
+        neither a response nor a failure. A request that never commits (a download, a
+        204) keeps the first True, which is why a caller bounds its wait by the second.
+        """
+        pending = self._first_document_since_rotation is not None
+        newest = self._last_document
+        return pending, pending and newest is not None and newest.status is None
 
     def list_entries(
         self,
